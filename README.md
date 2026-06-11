@@ -4,8 +4,7 @@
 
 **[Open the Tool](https://mshomper.github.io/f13ld.wave)**
 
-<!-- TODO: replace with the F13LD.wave hero capture (drag a PNG into the GitHub editor to generate the asset URL) -->
-<img width="1266" height="981" alt="f13ld wave git image" src="https://github.com/user-attachments/assets/REPLACE-WITH-WAVE-HERO" />
+<img width="1741" height="862" alt="f13ld wave github image" src="https://github.com/user-attachments/assets/241c3d5f-5bc8-4843-a7df-930286e15313" />
 
 A browser-based standing-wave topology explorer for generating periodic metamaterial scaffolds from superposed cosine modes. It is the three-dimensional analog of the nodal figures sand traces on a vibrating Chladni plate: a bank of standing-wave terms is summed under a chosen symmetry operator and thresholded into a solid or thin-sheet surface. A single design pipeline carries the result through a WebGL 2.0 raymarched 3D preview, live volume-fraction and surface-area metrics, MIL-HS mechanical homogenization, and JSON export for downstream meshing and validation.
 
