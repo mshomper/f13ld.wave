@@ -38,7 +38,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    max-width: 1400px;
+    max-width: 1100px;
     margin: 0 auto;
     width: 100%;
   }
@@ -2378,5 +2378,325 @@ resize();
 requestRender();
 </script>
 
+
+<!-- ===================================================================== -->
+<!-- ==========  F13LD HELP SYSTEM  ·  modular drop-in (v1)  ============== -->
+<!-- Additive only. Per-tool parts: TUTORIAL_URL, TOOL_TITLE, SECTIONS.    -->
+<!-- Engine (CSS + script) is identical across F13LD tools.               -->
+<!-- ===================================================================== -->
+<style id="f13h-style">
+  :root{
+    --f13h-accent:      var(--amber-hi, #F59E0B);
+    --f13h-accent-soft: var(--amber, #D97706);
+    --f13h-panel:       var(--panel, #15100A);
+    --f13h-panel2:      var(--panel-2, #1C160D);
+    --f13h-bg:          var(--bg, #0F0B07);
+    --f13h-border:      var(--border, #3A2D1A);
+    --f13h-border-hi:   var(--border-hi, #5C4624);
+    --f13h-text:        var(--text, #D4C5A8);
+    --f13h-dim:         var(--text-dim, #8B7A5C);
+    --f13h-bright:      var(--gold-pale, #FEF3C7);
+  }
+  .f13h-trigger{
+    width:28px;height:28px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    background:transparent;border:0.5px solid var(--f13h-border-hi);
+    color:var(--f13h-dim);font-family:'Exo 2',system-ui,sans-serif;
+    font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0;
+    transition:all .15s ease;line-height:1;padding:0;
+  }
+  .f13h-trigger:hover{color:var(--f13h-accent);border-color:var(--f13h-accent);
+    box-shadow:0 0 8px rgba(245,158,11,0.25);}
+  .f13h-trigger.active{color:var(--f13h-accent);border-color:var(--f13h-accent);}
+  .f13h-i{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:14px;height:14px;border-radius:50%;
+    border:0.5px solid var(--f13h-border-hi);color:var(--f13h-dim);
+    background:transparent;font-size:9px;font-weight:700;font-style:italic;
+    font-family:Georgia,'Times New Roman',serif;
+    cursor:pointer;margin-left:6px;flex-shrink:0;vertical-align:middle;
+    transition:all .15s ease;padding:0;line-height:1;
+  }
+  .f13h-i:hover{color:var(--f13h-bg);background:var(--f13h-accent);border-color:var(--f13h-accent);}
+  .group-title .f13h-i{margin-left:5px;}
+  .f13h-scrim{
+    position:fixed;inset:0;background:rgba(8,6,3,0.55);
+    -webkit-backdrop-filter:blur(1.5px);backdrop-filter:blur(1.5px);
+    opacity:0;pointer-events:none;transition:opacity .22s ease;z-index:998;
+  }
+  .f13h-scrim.open{opacity:1;pointer-events:auto;}
+  .f13h-drawer{
+    position:fixed;top:48px;right:0;
+    width:min(440px,100%);max-height:calc(100vh - 64px);
+    background:var(--f13h-panel);
+    border:0.5px solid var(--f13h-border);border-top:none;
+    border-radius:0 0 0 14px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.5);
+    display:flex;flex-direction:column;
+    transform:translateY(calc(-100% - 48px));opacity:0;pointer-events:none;
+    transition:transform .28s cubic-bezier(.22,.61,.36,1),opacity .2s ease;
+    z-index:999;font-family:'Exo 2',system-ui,sans-serif;
+  }
+  .f13h-drawer.open{transform:translateY(0);opacity:1;pointer-events:auto;}
+  @media (max-width:480px){ .f13h-drawer{width:100%;border-radius:0;} }
+  .f13h-head{
+    display:flex;align-items:center;gap:10px;
+    padding:13px 16px 11px;border-bottom:0.5px solid var(--f13h-border);flex-shrink:0;
+  }
+  .f13h-head h2{
+    font-size:13px;font-weight:700;letter-spacing:0.06em;
+    color:var(--f13h-bright);margin:0;
+  }
+  .f13h-head h2 b{color:var(--f13h-accent);font-weight:700;}
+  .f13h-head h2 span{font-size:9px;letter-spacing:0.14em;color:var(--f13h-dim);
+    text-transform:uppercase;margin-left:6px;}
+  .f13h-tut{
+    margin-left:auto;font-size:10px;letter-spacing:0.04em;
+    color:var(--f13h-accent);text-decoration:none;
+    border:0.5px solid var(--f13h-accent-soft);border-radius:20px;
+    padding:3px 10px;white-space:nowrap;transition:background .15s;
+  }
+  .f13h-tut:hover{background:rgba(245,158,11,0.12);}
+  .f13h-close{
+    width:24px;height:24px;border-radius:6px;border:none;background:transparent;
+    color:var(--f13h-dim);font-size:18px;cursor:pointer;line-height:1;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;
+  }
+  .f13h-close:hover{color:var(--f13h-bright);background:var(--f13h-panel2);}
+  .f13h-body{overflow-y:auto;padding:4px 16px 20px;}
+  .f13h-intro{font-size:11px;line-height:1.55;color:var(--f13h-dim);
+    margin:12px 0 4px;padding-bottom:4px;}
+  .f13h-section-t{
+    font-size:9px;letter-spacing:0.16em;text-transform:uppercase;
+    color:var(--f13h-accent);margin:18px 0 8px;display:flex;align-items:center;gap:7px;
+  }
+  .f13h-section-t::before{content:"";width:4px;height:4px;border-radius:50%;
+    background:var(--f13h-accent);box-shadow:0 0 6px var(--f13h-accent);}
+  .f13h-card{
+    background:var(--f13h-panel2);border:0.5px solid var(--f13h-border);
+    border-radius:9px;padding:11px 12px;margin-bottom:8px;
+    transition:border-color .25s ease,box-shadow .25s ease;
+  }
+  .f13h-card.flash{border-color:var(--f13h-accent);
+    box-shadow:0 0 0 1px var(--f13h-accent),0 0 14px rgba(245,158,11,0.28);}
+  .f13h-card-h{display:flex;align-items:baseline;gap:8px;margin-bottom:3px;flex-wrap:wrap;}
+  .f13h-name{font-size:12px;font-weight:700;color:var(--f13h-bright);letter-spacing:0.02em;}
+  .f13h-range{
+    font-size:9px;color:var(--f13h-dim);border:0.5px solid var(--f13h-border-hi);
+    border-radius:10px;padding:1px 7px;white-space:nowrap;
+    font-family:'JetBrains Mono',ui-monospace,monospace;
+  }
+  .f13h-line{display:flex;gap:8px;font-size:11px;line-height:1.5;margin-top:5px;color:var(--f13h-text);}
+  .f13h-tag{
+    flex-shrink:0;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;
+    color:var(--f13h-dim);width:34px;padding-top:2px;font-weight:700;text-align:right;
+  }
+  .f13h-line.means .f13h-tag{color:var(--f13h-accent-soft);}
+  .f13h-body::-webkit-scrollbar{width:8px;}
+  .f13h-body::-webkit-scrollbar-track{background:var(--f13h-panel);}
+  .f13h-body::-webkit-scrollbar-thumb{background:var(--f13h-border);border-radius:4px;}
+  .f13h-body::-webkit-scrollbar-thumb:hover{background:var(--f13h-border-hi);}
+</style>
+
+<script id="f13h-script">
+(function(){
+  "use strict";
+
+  /* ---------- PER-TOOL CONFIG (only this block changes per tool) -------- */
+  var TUTORIAL_URL = 'https://tutorial.f13ld.app/wave';
+  var TOOL_TITLE   = 'wave';
+  var INTRO = 'F13LD.wave builds triply-periodic surfaces from superposed 3D standing waves \u2014 cymatics in a unit cell. The nodal surface of the summed field becomes your lattice. Tap any i beside a control to jump here.';
+
+  var SECTIONS = [
+    { title:'Preset', groupAnchor:'#preset', items:[
+      { id:'preset', label:'Preset',
+        what:'Loads a ready-made bank of modes + symmetry that lands on a known topology.',
+        see:'Swaps the whole structure instantly \u2014 Gyroid, Schwarz P, Diamond. "Randomize" explores between them.',
+        why:'Every classic TPMS is just a specific recipe of standing waves; presets are the shortcut to those recipes.' }
+    ]},
+    { title:'Symmetry', groupAnchor:'#sym-toggle', items:[
+      { id:'symmetry', label:'Symmetry',
+        what:'The rule for how the listed modes are summed into one scalar field.',
+        see:'Same modes, different weave \u2014 Pure sums directly; Chiral breaks mirror symmetry (handedness); Schoen rotates phases toward the gyroid family.',
+        why:'The summation symmetry forces the field into a crystal class \u2014 it is the lattice grammar applied to the waves.' }
+    ]},
+    { title:'Field', items:[
+      { id:'phase', label:'phase \u00b7 A / B', rowAnchor:'#sign-toggle',
+        what:'Picks which side of the level set is kept as solid.',
+        see:'Solid and void swap \u2014 you get the complementary network.',
+        why:'A surface splits space into two interpenetrating networks; this picks which one becomes your lattice.' },
+      { id:'mode', label:'mode \u00b7 Solid / Sheet', rowAnchor:'#mode-toggle',
+        what:'Reads the field as a filled network (Solid) or a thin wall riding the surface (Sheet).',
+        see:'Solid = bulk struts; Sheet = a hollow shell of constant thickness.',
+        why:'Sheet networks reach higher stiffness-per-density and double the surface area \u2014 wall-efficiency vs. bulk in one toggle.' },
+      { id:'thickness', label:'thickness', range:'0.02 \u2013 1.5  \u00b7  Sheet only', rowAnchor:'#thickness',
+        what:'Wall thickness of the sheet interpretation.',
+        see:'The shell fattens or thins; volume fraction climbs with it.',
+        why:'Sets the sheet\u2019s relative density directly \u2014 your main knob for trading stiffness against weight.' },
+      { id:'iso', label:'iso', range:'\u22123 \u2026 3', rowAnchor:'#iso',
+        what:'The level-set threshold the surface is drawn at.',
+        see:'Sweep it and the solid fraction grows or shrinks; struts thicken, then pinch off at the extremes.',
+        why:'Your volume-fraction / relative-density dial \u2014 the single biggest lever for placing the lattice on the stiffness-density curve.' },
+      { id:'cellScale', label:'cell scale', range:'0.5 \u2013 3', rowAnchor:'#cellScale',
+        what:'Spatial frequency of the waves \u2014 how many unit cells fill the domain.',
+        see:'Larger = coarser, bigger cells; smaller = finer, more repeats.',
+        why:'Sets pore size and feature scale \u2014 transport, infiltration, and the smallest printable feature live here.' },
+      { id:'time', label:'phase \u03c9t', range:'0 \u2013 2\u03c0', rowAnchor:'#time',
+        what:'Temporal phase of the standing wave. \u25b6 Animate sweeps it.',
+        see:'The structure breathes through a cycle and returns \u2014 nodes fixed, antinodes pulsing.',
+        why:'Walks a continuous family of related topologies; freezing at a phase selects one member. This is the cymatic axis \u2014 vibration shaping form.' }
+    ]},
+    { title:'Mode Bank', groupAnchor:'#add-mode', items:[
+      { id:'modebank', label:'Mode Bank \u00b7 n m p A \u03c6',
+        what:'One row = one standing-wave mode. n, m, p are the integer wavevector (cells per axis); A its amplitude; \u03c6 its phase.',
+        see:'Adding a mode layers another nodal pattern; raising A makes it dominate; \u03c6 slides where its nodes sit. Solo isolates one.',
+        why:'The raw cymatic synthesizer \u2014 every preset is just a short list of these. n:m:p ratios set direction and anisotropy; compose new topologies from scratch.' }
+    ]},
+    { title:'View', groupAnchor:'#tile-toggle', items:[
+      { id:'tiling', label:'tiling \u00b7 1\u00d7 / 2\u00d7 / 3\u00d7',
+        what:'Repeats the unit cell for display only.',
+        see:'A field of cells instead of one \u2014 easier to read periodicity and connectivity.',
+        why:'Confirms the structure tiles seamlessly before you hand it to F13LD.mesh.' },
+      { id:'quality', label:'quality', range:'48 \u2013 192', rowAnchor:'#quality',
+        what:'Raymarch sampling resolution of the live preview.',
+        see:'Higher = crisper surface, smoother edges, slower; lower = faster, blockier.',
+        why:'Preview fidelity only \u2014 it does not change the geometry or what gets exported.' }
+    ]},
+    { title:'Homogenization \u00b7 MIL-HS', groupAnchor:'#wv-run', items:[
+      { id:'hgrid', label:'grid', range:'32\u00b3 / 48\u00b3 / 64\u00b3',
+        what:'Voxel resolution used to estimate effective stiffness.',
+        see:'No change to the model; higher grid = more accurate numbers, slower run.',
+        why:'Bump it when the anisotropy ratios need to be trustworthy.' },
+      { id:'hEs', label:'E\u209b (GPa)',
+        what:'Young\u2019s modulus of the bulk solid you will print.',
+        see:'Scales the reported effective moduli linearly.',
+        why:'Sets the material baseline \u2014 e.g. Ti-6Al-4V \u2248 110 GPa \u2014 that the estimate scales from.' },
+      { id:'hnu', label:'\u03bd (solid)', range:'0 \u2013 0.49',
+        what:'Poisson\u2019s ratio of the bulk solid.',
+        see:'Adjusts the estimated effective response.',
+        why:'The solid\u2019s lateral coupling, fed into the MIL-HS bound.' },
+      { id:'hrun', label:'Run homogenization',
+        what:'Computes the directional-stiffness surface plus volume fraction and surface area for the current geometry.',
+        see:'Fills the stiffness glyph and the A / VF / SSA readouts.',
+        why:'A fast estimate (MIL fabric + Hashin\u2013Shtrikman ceiling); F13LD.lab does the rigorous FFT version.' }
+    ]}
+  ];
+  /* ---------- END PER-TOOL CONFIG ------------------------------------- */
+
+  function el(tag, cls, html){ var n=document.createElement(tag); if(cls) n.className=cls; if(html!=null) n.innerHTML=html; return n; }
+
+  var scrim, drawer, trigger;
+
+  function line(tag, txt, kind){
+    var l = el('div','f13h-line'+(kind?(' '+kind):''));
+    l.appendChild(el('span','f13h-tag',tag));
+    l.appendChild(el('span',null,txt));
+    return l;
+  }
+
+  function build(){
+    scrim = el('div','f13h-scrim');
+    drawer = el('div','f13h-drawer');
+
+    var head = el('div','f13h-head');
+    head.appendChild(el('h2', null, 'F13LD.<b>'+TOOL_TITLE+'</b><span>field guide</span>'));
+    var tut = document.createElement('a');
+    tut.className='f13h-tut'; tut.href=TUTORIAL_URL; tut.target='_blank'; tut.rel='noopener';
+    tut.textContent='Tutorial \u2197';
+    head.appendChild(tut);
+    var close = el('button','f13h-close','\u00d7'); close.setAttribute('aria-label','Close');
+    close.addEventListener('click', closeDrawer);
+    head.appendChild(close);
+    drawer.appendChild(head);
+
+    var body = el('div','f13h-body');
+    body.appendChild(el('div','f13h-intro', INTRO));
+    SECTIONS.forEach(function(sec){
+      body.appendChild(el('div','f13h-section-t', sec.title));
+      sec.items.forEach(function(it){
+        var card = el('div','f13h-card'); card.id='f13h-card-'+it.id;
+        var h = el('div','f13h-card-h');
+        h.appendChild(el('span','f13h-name', it.label));
+        if(it.range) h.appendChild(el('span','f13h-range', it.range));
+        card.appendChild(h);
+        if(it.what) card.appendChild(line('sets',  it.what));
+        if(it.see)  card.appendChild(line('shows', it.see));
+        if(it.why)  card.appendChild(line('means', it.why, 'means'));
+        body.appendChild(card);
+      });
+    });
+    drawer.appendChild(body);
+
+    document.body.appendChild(scrim);
+    document.body.appendChild(drawer);
+    scrim.addEventListener('click', closeDrawer);
+  }
+
+  function openDrawer(id){
+    scrim.classList.add('open');
+    drawer.classList.add('open');
+    if(trigger) trigger.classList.add('active');
+    if(id){
+      setTimeout(function(){
+        var c = document.getElementById('f13h-card-'+id);
+        if(!c) return;
+        c.scrollIntoView({block:'center', behavior:'smooth'});
+        c.classList.add('flash');
+        setTimeout(function(){ c.classList.remove('flash'); }, 1500);
+      }, 90);
+    }
+  }
+  function closeDrawer(){
+    scrim.classList.remove('open');
+    drawer.classList.remove('open');
+    if(trigger) trigger.classList.remove('active');
+  }
+
+  function makeI(id){
+    var b = el('button','f13h-i','i'); b.type='button';
+    b.setAttribute('aria-label','About this control');
+    b.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); openDrawer(id); });
+    return b;
+  }
+  function attachRow(sel, id){
+    var node = document.querySelector(sel); if(!node) return;
+    var row = node.closest('.row'); if(!row) return;
+    var lab = row.querySelector('label'); if(!lab) return;
+    lab.appendChild(makeI(id));
+  }
+  function attachGroup(sel, id){
+    var node = document.querySelector(sel); if(!node) return;
+    var grp = node.closest('.group'); if(!grp) return;
+    var title = grp.querySelector('.group-title'); if(!title) return;
+    title.appendChild(makeI(id));
+  }
+
+  function init(){
+    build();
+    // trigger button into the header's right cluster
+    var fhRight = document.querySelector('.fh-right');
+    if(fhRight){
+      trigger = el('button','f13h-trigger','?');
+      trigger.type='button';
+      trigger.title='Help \u00b7 control guide';
+      trigger.setAttribute('aria-label','Help');
+      trigger.addEventListener('click', function(){
+        if(drawer.classList.contains('open')) closeDrawer(); else openDrawer(null);
+      });
+      fhRight.insertBefore(trigger, fhRight.firstChild);
+    }
+    // inline i affordances
+    SECTIONS.forEach(function(sec){
+      if(sec.groupAnchor && sec.items.length) attachGroup(sec.groupAnchor, sec.items[0].id);
+      sec.items.forEach(function(it){ if(it.rowAnchor) attachRow(it.rowAnchor, it.id); });
+    });
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeDrawer(); });
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+<!-- =====================  END F13LD HELP SYSTEM  ======================= -->
 </body>
 </html>
