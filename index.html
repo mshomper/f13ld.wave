@@ -471,7 +471,7 @@
     </div>
     <div class="fh-right">
       <button class="fh-mesh-btn" onclick="openInMesh()">&#10697; Open in F13LD.mesh</button>
-      <span class="fh-version">v0.3</span>
+      <span class="fh-version">v0.4</span>
       <div class="fh-icon" style="background:radial-gradient(ellipse at 50% 42%, #243042 0%, #161D27 100%)">
         <svg width="18" height="18" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
           <path d="M35.00,20.00 C35.00,21.65 27.45,22.45 24.95,24.95 C22.45,27.45 21.65,35.00 20.00,35.00 C18.35,35.00 17.55,27.45 15.05,24.95 C12.55,22.45 5.00,21.65 5.00,20.00 C5.00,18.35 12.55,17.55 15.05,15.05 C17.55,12.55 18.35,5.00 20.00,5.00 C21.65,5.00 22.45,12.55 24.95,15.05 C27.45,17.55 35.00,18.35 35.00,20.00 Z" fill="none" stroke="#FBBF24" stroke-width="1.6" stroke-linejoin="round"/>
@@ -854,6 +854,28 @@ vec3 fieldNormal(vec3 p) {
   ));
 }
 
+// F13LD shared viewer shading. f13Map = cymatic field scaled by the local
+// gradient at the hit (f13G), clipped to the cell box and clip plane.
+float f13Cym(vec3 p) {
+  float r = fieldRaw(p);
+  float c = (u_sheetMode > 0.5) ? abs(u_iso - r) - u_thickness : (u_iso - r);
+  if (u_signFlip > 0.5) c = -c;
+  return c;
+}
+float f13G;
+float f13Map(vec3 p) {
+  float half_ = 5.0 * u_cellScale * u_tile;
+  vec3 d = abs(p) - vec3(half_);
+  float s = max(f13Cym(p) / f13G, max(max(d.x, d.y), d.z));
+  if (u_clipAxis > 0.5) {
+    float coord = (u_clipAxis < 1.5) ? p.x : ((u_clipAxis < 2.5) ? p.y : p.z);
+    float cpw = u_clipPos * half_;
+    s = max(s, (u_clipSide > 0.0) ? (coord - cpw) : (cpw - coord));
+  }
+  return s;
+}
+// @F13_SHADE_GLSL
+
 // Ray-AABB
 bool rayBox(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tn, out float tf) {
   vec3 invD = 1.0 / rd;
@@ -937,65 +959,16 @@ void main() {
   // Ensure normal faces ray
   if (dot(N, rd) > 0.0) N = -N;
 
-  // Two-light setup, tinted key + cool fill, plus camera-following warm fill.
-  // The view-relative fill ensures whatever the camera is looking at receives
-  // SOME illumination — like a soft photographer's fill card moving with the
-  // viewer. This is what keeps back-of-cube readable when you orbit around.
-  vec3 keyDir  = normalize(vec3( 0.6,  0.7,  0.5));
-  vec3 fillDir = normalize(vec3(-0.4,  0.2, -0.7));
-  float key   = max(dot(N, keyDir),  0.0);
-  float fill  = max(dot(N, fillDir), 0.0);
-  float vfill = max(dot(N, -rd),     0.0);   // VIEW_FILL: camera-following soft fill
-
-  vec3 keyCol   = u_surfaceTint * 1.15;                          // tinted key
-  vec3 fillCol  = vec3(0.32, 0.40, 0.55) * 0.55;                 // cool world-fill (unchanged)
-  vec3 vfillCol = u_surfaceTint * 0.55;                          // warm view-fill (tinted, restrained)
-  vec3 ambient  = vec3(0.09, 0.08, 0.07);                        // bumped slightly from (0.06,0.05,0.04)
-
-  // Rim/fresnel
-  float fres = pow(1.0 - max(dot(N, -rd), 0.0), 3.0);
-  vec3 rimCol = mix(u_surfaceTint, vec3(1.0), 0.3) * fres * 0.6;
-
-  // ---- Iridescent specular (camera-relative light) ----
-  // Phong highlight whose light direction is anchored to camera space,
-  // offset to the upper-right of the view. This gives a "studio light
-  // follows the viewer" feel, so the highlight tracks consistently as
-  // the user orbits — instead of disappearing at angles where a world-
-  // fixed key would be antiparallel to the view direction (a degenerate
-  // half-vector). Color is a soft complement of u_surfaceTint, so the
-  // highlight reads as iridescent regardless of which tint is active.
-  // Tunable: SPEC_EXP, SPEC_GAIN, COMPL_SOFTNESS.
-  vec3 worldUp = abs(rd.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
-  vec3 vRight = normalize(cross(worldUp, rd));   // camera right
-  vec3 vUp    = cross(rd, vRight);                // camera up
-  vec3 specLightDir = normalize(-rd + vUp * 0.6 + vRight * 0.4);
-  vec3 H = normalize(-rd + specLightDir);
-  float spec = pow(max(dot(N, H), 0.0), 24.0);              // SPEC_EXP = 24
-  vec3 specCol = (vec3(1.0) - u_surfaceTint * 0.7)          // COMPL_SOFTNESS = 0.7
-                 * spec * 0.55;                              // SPEC_GAIN = 0.55
-
-  // ---- Normal-driven iridescent hue shift ----
-  // Subtle per-channel oscillation based on normal direction — different
-  // facets of the cymatic geometry pick up slightly different tints.
-  // Amplitude tuned restrained (±IRID_AMP) so it reads as "iridescent
-  // metal" not "rainbow shader." IRID_AMP = 0.06.
-  float iridT = dot(N, normalize(vec3(0.7, 0.5, 0.5))) * 0.5 + 0.5;
-  vec3 iridShift = vec3(
-    cos(iridT * 6.28318),
-    cos(iridT * 6.28318 + 2.09439),
-    cos(iridT * 6.28318 + 4.18879)
-  ) * 0.06;
-
-  // Depth fade based on hit point distance from camera ray origin
-  float hitT = length(hitP - ro);
-  float depth = (hitT - tn) / max(tf - tn, 1.0e-4);
-  float fog = clamp(1.0 - depth * 0.4, 0.45, 1.0);
-
-  vec3 col = (key * keyCol + fill * fillCol + vfill * vfillCol + ambient + rimCol + specCol) * fog + iridShift;
-
-  // Tonemap soft
-  col = col / (1.0 + col * 0.85);
-  col = pow(col, vec3(0.85));
+  // Shared F13LD shading. Body color = the surface tint (WAVE amber, or the
+  // soloed mode's palette color). Cut face = the cell box or clip plane.
+  float f13dmy;
+  vec3 f13g = vec3(
+    f13Cym(hitP + vec3(0.05, 0.0, 0.0)) - f13Cym(hitP - vec3(0.05, 0.0, 0.0)),
+    f13Cym(hitP + vec3(0.0, 0.05, 0.0)) - f13Cym(hitP - vec3(0.0, 0.05, 0.0)),
+    f13Cym(hitP + vec3(0.0, 0.0, 0.05)) - f13Cym(hitP - vec3(0.0, 0.0, 0.05))) / 0.1;
+  f13G = clamp(length(f13g), 0.02, 100.0);
+  bool isCut = f13Cym(hitP) < fieldSDF(hitP, f13dmy) - 1e-4;
+  vec3 col = f13Shade(u_surfaceTint, hitP, N, rd, u_rot, isCut, 5.0 * u_cellScale, 0.05, 1.6 * half_);
 
   if (u_clipAxis > 0.5) {
     vec3 axM2 = vec3((u_clipAxis < 1.5) ? 1.0 : 0.0, (u_clipAxis > 1.5 && u_clipAxis < 2.5) ? 1.0 : 0.0, (u_clipAxis > 2.5) ? 1.0 : 0.0);
@@ -1011,6 +984,125 @@ void main() {
 
 <script>
 'use strict';
+// ==== F13LD-SHADE v1 · shared viewer shading (GLSL). Keep this block byte-identical in every F13LD tool. ====
+// The shader using it must define  float f13Map(vec3 p)  (distance to the visible
+// surface, clipped to the visible domain) BEFORE inserting F13_SHADE_GLSL.
+// Works in GLSL ES 1.00 and 3.00. f13Shade() returns a tone-mapped sRGB color.
+const F13_SHADE_GLSL = `
+uniform float uF13Shadow;uniform float uF13AO;uniform float uF13WarmCool;uniform float uF13Cut;uniform float uF13Lime;uniform float uF13Interact;
+vec3 f13Lin(vec3 c){return pow(max(c,vec3(0.0)),vec3(2.2));}
+vec3 f13Tone(vec3 c){c=(c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14);return pow(clamp(c,0.0,1.0),vec3(1.0/2.2));}
+vec3 f13KeyDir(mat3 R){return normalize(-0.55*R[0]+0.75*R[1]+0.55*R[2]);}
+vec3 f13FillDir(mat3 R){return normalize(0.7*R[0]-0.35*R[1]+0.25*R[2]);}
+float f13AO(vec3 p,vec3 n,float cell,float eps){
+  float occ=0.0;float w=1.0;
+  for(int i=0;i<5;i++){float h=cell*(0.04+0.04*float(i))+2.0*eps;float d=f13Map(p+n*h);occ+=max(h-d,0.0)*w;w*=0.8;}
+  return clamp(1.0-occ*(3.2/cell),0.0,1.0);
+}
+float f13Shadow(vec3 ro,vec3 ld,float eps,float tMax){
+  float res=1.0;float t=4.0*eps;
+  for(int i=0;i<48;i++){float h=f13Map(ro+ld*t);res=min(res,8.0*h/t);t+=clamp(h,0.75*eps,tMax*0.05);if(res<0.02||t>tMax)break;}
+  return clamp(res,0.0,1.0);
+}
+vec3 f13Shade(vec3 base,vec3 p,vec3 n,vec3 rd,mat3 R,bool isCut,float cell,float eps,float tMax){
+  vec3 alb=f13Lin(base);
+  if(uF13Cut>0.5&&isCut){float lum=dot(alb,vec3(0.2126,0.7152,0.0722));alb=mix(alb,vec3(lum),0.3)*0.9;}
+  bool wc=uF13WarmCool>0.5;
+  vec3 kD=f13KeyDir(R);vec3 fD=f13FillDir(R);
+  vec3 kC=wc?vec3(1.0,0.93,0.82)*1.35:vec3(1.3);
+  vec3 fC=wc?vec3(0.30,0.42,0.62)*0.75:vec3(0.5);
+  float kd=max(dot(n,kD),0.0);
+  float sh=1.0;if(uF13Shadow>0.5&&uF13Interact<0.5&&kd>0.0)sh=f13Shadow(p+n*3.0*eps,kD,eps,tMax);
+  float ao=1.0;if(uF13AO>0.5)ao=f13AO(p,n,cell,eps);
+  float hemi=0.5+0.5*dot(n,R[1]);
+  vec3 amb=mix(vec3(0.10,0.09,0.08),wc?vec3(0.20,0.23,0.30):vec3(0.24),hemi);
+  float vf=max(dot(n,-rd),0.0);
+  vec3 col=alb*(kC*kd*sh+fC*max(dot(n,fD),0.0)*mix(0.4,1.0,ao)+vec3(0.30)*vf*ao+amb*ao);
+  col+=vec3(0.35)*pow(max(dot(n,normalize(kD-rd)),0.0),48.0)*sh;
+  float fr=pow(1.0-vf,3.0);
+  if(uF13Lime>0.5)col+=f13Lin(vec3(0.784,0.961,0.259))*0.9*fr*ao;else col+=(alb*0.6+vec3(0.06))*fr*ao*0.5;
+  return f13Tone(col);
+}
+vec3 f13ShadeData(vec3 dataCol,vec3 p,vec3 n,vec3 rd,mat3 R,float cell,float eps,float tMax){
+  vec3 kD=f13KeyDir(R);float kd=max(dot(n,kD),0.0);
+  float sh=1.0;if(uF13Shadow>0.5&&uF13Interact<0.5&&kd>0.0)sh=f13Shadow(p+n*3.0*eps,kD,eps,tMax);
+  float ao=1.0;if(uF13AO>0.5)ao=f13AO(p,n,cell,eps);
+  float lit=(0.42+0.58*kd*sh)*mix(0.65,1.0,ao)+0.12*max(dot(n,-rd),0.0);
+  return clamp(dataCol*lit+vec3(0.18)*pow(max(dot(n,normalize(kD-rd)),0.0),48.0)*sh,0.0,1.0);
+}
+`;
+// ==== /F13LD-SHADE ====
+// ==== F13LD-VIEW v1 · shared viewer "view" menu (JS). Keep this block byte-identical in every F13LD tool. ====
+// f13ViewInit({tool, host, canvas, redraw, moving, css}) adds a "◐ view" menu to
+// host (a position:relative viewport box) and returns {opts, apply(gl,prog)}.
+// apply() sets the F13_SHADE_GLSL uniforms. Soft shadows pause while the user
+// orbits/zooms the canvas, drags a slider, or while moving() returns true.
+function f13ViewInit(cfg){
+  var DEF={shadows:true,occlusion:true,warmCool:true,cutFaces:true,limeEdges:false};
+  var LBL={shadows:'Shadows',occlusion:'Occlusion',warmCool:'Warm / cool light',cutFaces:'Shade cut faces',limeEdges:'Lime edges'};
+  var key='f13ld.'+cfg.tool+'.view',o={},k;
+  for(k in DEF)o[k]=DEF[k];
+  try{var j=JSON.parse(localStorage.getItem(key)||'null');if(j&&typeof j==='object'){for(k in DEF){if(typeof j[k]==='boolean')o[k]=j[k];}}}catch(e){}
+  var st={opts:o,interacting:false};
+  function save(){try{localStorage.setItem(key,JSON.stringify(o));}catch(e){}}
+  function redraw(){if(cfg.redraw)cfg.redraw();}
+  if(!document.getElementById('f13vStyle')){
+    var s=document.createElement('style');s.id='f13vStyle';
+    s.textContent='.f13v{position:absolute;top:10px;left:10px;z-index:20;font:10px "IBM Plex Mono",ui-monospace,monospace}'+
+      '.f13v>button{font:inherit;color:#8a8aa0;background:rgba(6,8,15,.85);border:.5px solid #2a2a3a;border-radius:5px;padding:3px 8px;cursor:pointer}'+
+      '.f13v>button:hover,.f13v>button[aria-expanded=true]{color:#e0e0ff;border-color:#888}'+
+      '.f13v-p{margin-top:4px;display:flex;flex-direction:column;gap:2px;background:rgba(6,8,15,.92);border:.5px solid #2a2a3a;border-radius:6px;padding:6px 10px 6px 8px;min-width:150px}'+
+      '.f13v-p[hidden]{display:none}'+
+      '.f13v-p label{display:flex;align-items:center;gap:7px;color:#e0e0ff;font-size:11px;cursor:pointer;user-select:none;min-height:24px;white-space:nowrap}'+
+      '.f13v-p input{width:13px;height:13px;margin:0;accent-color:#22d3ee;cursor:pointer}'+
+      '.f13v-p .f13v-r{align-self:flex-start;margin-top:3px;font:inherit;color:#8a8aa0;background:none;border:.5px solid #2a2a3a;border-radius:4px;padding:1px 7px;cursor:pointer}';
+    document.head.appendChild(s);
+  }
+  if(cfg.host){
+    var w=document.createElement('div');w.className='f13v';if(cfg.css)w.style.cssText=cfg.css;
+    var b=document.createElement('button');b.type='button';b.textContent='◐ view';b.title='Viewer shading options';b.setAttribute('aria-expanded','false');
+    var p=document.createElement('div');p.className='f13v-p';p.hidden=true;
+    var boxes={};
+    for(k in DEF){(function(k){var l=document.createElement('label'),c=document.createElement('input');c.type='checkbox';c.checked=o[k];
+      c.addEventListener('change',function(){o[k]=c.checked;save();redraw();});boxes[k]=c;l.appendChild(c);l.appendChild(document.createTextNode(LBL[k]));p.appendChild(l);})(k);}
+    var r=document.createElement('button');r.type='button';r.className='f13v-r';r.textContent='reset';
+    r.addEventListener('click',function(){for(var q in DEF){o[q]=DEF[q];boxes[q].checked=DEF[q];}save();redraw();});p.appendChild(r);
+    function setOpen(v){p.hidden=!v;b.setAttribute('aria-expanded',v?'true':'false');}
+    b.addEventListener('click',function(e){e.stopPropagation();setOpen(p.hidden);});
+    p.addEventListener('click',function(e){e.stopPropagation();});
+    ['mousedown','touchstart','pointerdown','wheel'].forEach(function(ev){w.addEventListener(ev,function(e){e.stopPropagation();},{passive:true});});
+    document.addEventListener('click',function(){if(!p.hidden)setOpen(false);});
+    w.appendChild(b);w.appendChild(p);cfg.host.appendChild(w);
+  }
+  var tmr=null;
+  function begin(){st.interacting=true;}
+  function end(){if(st.interacting){st.interacting=false;redraw();}}
+  function endSoon(){begin();clearTimeout(tmr);tmr=setTimeout(end,200);}
+  if(cfg.canvas){
+    cfg.canvas.addEventListener('mousedown',begin);
+    cfg.canvas.addEventListener('touchstart',begin,{passive:true});
+    cfg.canvas.addEventListener('wheel',endSoon,{passive:true});
+  }
+  window.addEventListener('mouseup',end);
+  window.addEventListener('touchend',function(e){if(!e.touches||!e.touches.length)end();});
+  document.addEventListener('input',function(e){var t=e.target;if(t&&t.type==='range')endSoon();},true);
+  var locs=typeof WeakMap!=='undefined'?new WeakMap():null;
+  st.apply=function(gl,prog){
+    if(!gl||!prog)return;
+    var L=locs&&locs.get(prog);
+    if(!L){L={};['uF13Shadow','uF13AO','uF13WarmCool','uF13Cut','uF13Lime','uF13Interact'].forEach(function(n){L[n]=gl.getUniformLocation(prog,n);});if(locs)locs.set(prog,L);}
+    var mv=st.interacting||(cfg.moving?!!cfg.moving():false);
+    if(L.uF13Shadow)gl.uniform1f(L.uF13Shadow,o.shadows?1:0);
+    if(L.uF13AO)gl.uniform1f(L.uF13AO,o.occlusion?1:0);
+    if(L.uF13WarmCool)gl.uniform1f(L.uF13WarmCool,o.warmCool?1:0);
+    if(L.uF13Cut)gl.uniform1f(L.uF13Cut,o.cutFaces?1:0);
+    if(L.uF13Lime)gl.uniform1f(L.uF13Lime,o.limeEdges?1:0);
+    if(L.uF13Interact)gl.uniform1f(L.uF13Interact,mv?1:0);
+  };
+  return st;
+}
+// ==== /F13LD-VIEW ====
+let f13View = null;
 
 // ============================================================
 //   F13LD.wave — App logic
@@ -1049,7 +1141,7 @@ const MODE_PALETTE = [
 // Default surface tint when no mode is soloed — numerically identical
 // to the original hardcoded amber key color, so un-soloed renders look
 // unchanged from v0.1.
-const SURFACE_TINT_AMBER = [1.00, 0.72, 0.30];
+const SURFACE_TINT_AMBER = [0.851, 0.467, 0.024];   // WAVE family color #D97706 (matches F13LD.mesh)
 
 // Effective modes = the array the renderer and metrics worker actually
 // see, accounting for solo state. Everywhere else (presets, exports,
@@ -1437,7 +1529,7 @@ function compile(type, src) {
 }
 
 const vs = compile(gl.VERTEX_SHADER,   $('vs').textContent);
-const fs = compile(gl.FRAGMENT_SHADER, $('fs').textContent);
+const fs = compile(gl.FRAGMENT_SHADER, $('fs').textContent.replace('// @F13_SHADE_GLSL', F13_SHADE_GLSL));
 const prog = gl.createProgram();
 gl.attachShader(prog, vs);
 gl.attachShader(prog, fs);
@@ -1650,6 +1742,7 @@ function render() {
     gl.uniform1f(pUni[i], m.phi || 0);
   }
 
+  if (f13View) f13View.apply(gl, prog);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 
   drawAxisGizmo(rotMat, canvas.clientWidth, canvas.clientHeight, camZoom);
@@ -2389,6 +2482,7 @@ function openInMesh() {
 // ============================================================
 applyPreset('schwarzp');
 resize();
+f13View = f13ViewInit({ tool: 'wave', host: $('cw'), canvas: canvas, css: 'top:12px;left:auto;right:12px', redraw: requestRender });
 requestRender();
 </script>
 
