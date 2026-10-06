@@ -101,6 +101,26 @@
     transition: background 0.15s;
   }
   .fh-mesh-btn:hover { background: rgba(29, 158, 117, 0.18); }
+/* ── Header handoff buttons (same in every F13LD design tool) ──
+   Short labels so they fit on phones; each tooltip carries the full name.
+   Queue's ▾ (pick which queue) is joined to the Queue pill as one split control. */
+.fh-right .f13ldq-split{gap:0}
+.fh-right .f13ldq-split .f13ldq-main{border-radius:20px 0 0 20px;border-right:none;padding-right:9px}
+.fh-right .f13ldq-split .f13ldq-caret{border-radius:0 20px 20px 0;padding-left:7px;padding-right:8px;border-left:0.5px solid rgba(29,158,117,0.4)}
+/* Phones: brand + help/version/icon on the top row; Queue, Mesh and Lab share
+   one row underneath (the ::after is a zero-height line break between them). */
+@media (max-width:560px){
+  .f13ld-header{flex-wrap:wrap;height:auto;padding:8px 12px 10px;row-gap:0;column-gap:8px}
+  .f13ld-header::after{content:'';order:1;flex:0 0 100%;height:0}
+  .fh-right{display:contents}
+  .fh-left{order:0;margin-right:auto}
+  .f13ld-header .f13h-trigger,.fh-version,.fh-icon{order:1}
+  .fh-right .fh-mesh-btn,.fh-right .f13ldq-split{order:2;margin-top:8px}
+  .fh-mesh-btn{flex:1 1 0;min-width:0;text-align:center;padding:7px 6px}
+  .fh-right .f13ldq-split{flex:1.4 1 0;min-width:0;display:flex}
+  .fh-right .f13ldq-split .f13ldq-main{flex:1 1 0;margin-top:0}
+  .fh-right .f13ldq-split .f13ldq-caret{flex:0 0 26px;padding:7px 0;margin-top:0}
+}
 
   /* ---- Viewport wrapper ---- */
   #cw {
@@ -470,8 +490,9 @@
       <div class="fh-tool-name" style="color:#5C4624">WAVE</div>
     </div>
     <div class="fh-right">
-      <button class="fh-mesh-btn" onclick="openInMesh()">&#10697; Open in F13LD.mesh</button>
-      <span class="fh-version">v0.4</span>
+      <button class="fh-mesh-btn" onclick="openInMesh()" title="Open in F13LD.mesh — build a watertight, printable 3MF" aria-label="Open in F13LD.mesh">⬡ Mesh</button>
+      <button class="fh-mesh-btn" onclick="openInLab()" title="Open in F13LD.lab — homogenize in the validated FFT solver" aria-label="Open in F13LD.lab">▦ Lab</button>
+      <span class="fh-version">v0.5</span>
       <div class="fh-icon" style="background:radial-gradient(ellipse at 50% 42%, #243042 0%, #161D27 100%)">
         <svg width="18" height="18" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
           <path d="M35.00,20.00 C35.00,21.65 27.45,22.45 24.95,24.95 C22.45,27.45 21.65,35.00 20.00,35.00 C18.35,35.00 17.55,27.45 15.05,24.95 C12.55,22.45 5.00,21.65 5.00,20.00 C5.00,18.35 12.55,17.55 15.05,15.05 C17.55,12.55 18.35,5.00 20.00,5.00 C21.65,5.00 22.45,12.55 24.95,15.05 C27.45,17.55 35.00,18.35 35.00,20.00 Z" fill="none" stroke="#FBBF24" stroke-width="1.6" stroke-linejoin="round"/>
@@ -2477,6 +2498,14 @@ function openInMesh() {
   window.open(url, '_blank');
 }
 
+// Open in F13LD.lab — the same recipe Open in F13LD.mesh sends, placed after
+// "#" so its length never matters (the recipe never leaves the browser).
+// F13LD.lab (v0.14.0+) reads #r= links for every F13LD family.
+function openInLab(){
+  var data=buildExportJSON();
+  window.open('https://mshomper.github.io/f13ld.lab/#r='+encodeURIComponent(JSON.stringify(data)),'_blank');
+}
+
 // ============================================================
 //   Boot
 // ============================================================
@@ -2819,18 +2848,24 @@ requestRender();
         return o.toDataURL('image/webp',0.72);
       }catch(e){ return null; }
     };
-    var RIGHT='.fh-right', ANCHOR='.fh-mesh-btn', LABEL='⊕ Add to queue';
+    var RIGHT='.fh-right', ANCHOR='.fh-mesh-btn', LABEL='⊕ Queue';
+    var TIP='Add to queue — save this recipe to an F13LD.queue list you can open on any device';
+    function tipQueue(){
+      var m=document.querySelector(RIGHT+' .f13ldq-main'), c=document.querySelector(RIGHT+' .f13ldq-caret');
+      if(m){ m.title=TIP; m.setAttribute('aria-label','Add to queue'); }
+      if(c){ c.title='Choose which queue'; }
+    }
     function mountReal(){
       var fb=document.getElementById('f13ldq-fallback'); if(fb) fb.remove();
       F13LDQueue.mountButton({ mount:RIGHT, anchor:ANCHOR, position:'before',
         className:'fh-mesh-btn', text:LABEL,
-        getRecipe:function(){ return buildExportJSON(); }, tool:'f13ld.wave' });
+        getRecipe:function(){ return buildExportJSON(); }, tool:'f13ld.wave' }); tipQueue();
     }
     function mountFallback(){
       if(document.getElementById('f13ldq-fallback')) return;
       var r=document.querySelector(RIGHT), a=document.querySelector(ANCHOR); if(!r) return;
       var b=document.createElement('button'); b.type='button'; b.id='f13ldq-fallback';
-      b.className='fh-mesh-btn'; b.textContent=LABEL;
+      b.className='fh-mesh-btn'; b.textContent=LABEL; b.title=TIP;
       b.addEventListener('click', function(){ alert('Add to queue is offline — couldn\u2019t reach the queue service. Reload the page to try again.'); });
       if(a) r.insertBefore(b,a); else r.appendChild(b);
     }
