@@ -114,6 +114,7 @@ Eight starting points spanning the operator space:
 - **thickness `t`** — shell half-width in sheet mode (0.02–1.5).
 - **Phase A / B** — sign flip; swaps which side of the level set is solid (the two complementary phases of the same field).
 - **cell scale** — physical cell size (0.5–3). Scales the exported domain in millimetres; it does not change the field's frequency content.
+- **stretch x / y / z** — (v0.6, 0.5–2) stretches the unit cell along each axis: the waves keep one period per cell edge, so the cell becomes a box and still tiles seamlessly. Cubic, Chiral and Schoen modes give equal stiffness on all three axes on a cube; stretching is how they become anisotropic. Exported as `field.stretch`; F13LD.mesh (v0.9.8) and F13LD.sweep (v0.29) read it, F13LD.lab still solves a cube and tags the design "stretched cell".
 - **phase ωt** — global standing-wave phase. Sweep it manually or press **Animate** to watch the nodal set evolve in real time.
 
 ---
@@ -172,6 +173,7 @@ The exported JSON carries the complete parameter set, the live metrics, and — 
     "thickness": null,
     "iso": 0.0,
     "cellScale": 1.0,
+    "stretch": [1.0, 1.0, 1.0],
     "phaseTime": 0.0,
     "modes": [
       { "n": 1, "m": 0, "p": 0, "A": 1.0, "phi": 0.0 },
@@ -213,6 +215,11 @@ The exported JSON carries the complete parameter set, the live metrics, and — 
 **Coordinate convention.** The field is evaluated at `q = (π/5)·x`, so the world cube `[-5, 5]` maps to exactly one cell (`q ∈ [-π, π]`) and tiles seamlessly. `cellScale` sets the physical cell size in the `domain` block; it is not a frequency multiplier. The SDF is negative-inside; F13LD.mesh applies a single sign flip into the Manifold (positive-inside) convention on import.
 
 ---
+
+## Status and next steps
+
+- **v0.6 (2026-10-10):** stretch sliders; volume fraction, surface area and the MIL-HS estimate measure the stretched cell (stiffness capped at the Voigt bound); export carries `field.stretch` and `domain.size_xyz`. Sweep's Wave family (v0.29) varies amplitudes, phases, phase time, the sheet iso shift and the stretch; fractional mode indices are refused there (one cell is not periodic).
+- **Next:** none planned in this tool. Ideas raised: modes beyond six would be acceptable if a design needs them (they were capped to keep the bank readable). Rigorous stiffness for stretched cells comes from F13LD.sweep (GPU) until F13LD.lab solves stretched cells.
 
 ## Part of the F13LD Suite
 

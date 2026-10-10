@@ -492,7 +492,7 @@
     <div class="fh-right">
       <button class="fh-mesh-btn" onclick="openInMesh()" title="Open in F13LD.mesh — build a watertight, printable 3MF" aria-label="Open in F13LD.mesh">⬡ Mesh</button>
       <button class="fh-mesh-btn" onclick="openInLab()" title="Open in F13LD.lab — homogenize in the validated FFT solver" aria-label="Open in F13LD.lab">▦ Lab</button>
-      <span class="fh-version">v0.5</span>
+      <span class="fh-version">v0.6</span>
       <div class="fh-icon" style="background:radial-gradient(ellipse at 50% 42%, #243042 0%, #161D27 100%)">
         <svg width="18" height="18" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
           <path d="M35.00,20.00 C35.00,21.65 27.45,22.45 24.95,24.95 C22.45,27.45 21.65,35.00 20.00,35.00 C18.35,35.00 17.55,27.45 15.05,24.95 C12.55,22.45 5.00,21.65 5.00,20.00 C5.00,18.35 12.55,17.55 15.05,15.05 C17.55,12.55 18.35,5.00 20.00,5.00 C21.65,5.00 22.45,12.55 24.95,15.05 C27.45,17.55 35.00,18.35 35.00,20.00 Z" fill="none" stroke="#FBBF24" stroke-width="1.6" stroke-linejoin="round"/>
@@ -599,6 +599,21 @@
         <label>cell scale</label>
         <input type="range" id="cellScale" min="0.5" max="3" step="0.05" value="1">
         <span class="value" id="cellScale-v">1.00</span>
+      </div>
+      <div class="row">
+        <label>stretch x</label>
+        <input type="range" id="stretchX" min="0.5" max="2" step="0.05" value="1">
+        <span class="value" id="stretchX-v">1.00</span>
+      </div>
+      <div class="row">
+        <label>stretch y</label>
+        <input type="range" id="stretchY" min="0.5" max="2" step="0.05" value="1">
+        <span class="value" id="stretchY-v">1.00</span>
+      </div>
+      <div class="row">
+        <label>stretch z</label>
+        <input type="range" id="stretchZ" min="0.5" max="2" step="0.05" value="1">
+        <span class="value" id="stretchZ-v">1.00</span>
       </div>
       <div class="row">
         <label>phase ωt</label>
@@ -746,6 +761,7 @@ uniform float u_clipPos;
 uniform float u_clipSide;
 uniform float u_iso;
 uniform float u_cellScale;
+uniform vec3  u_stretch;        // v0.6 — the cell's relative edges (x, y, z)
 uniform float u_time;
 uniform int   u_modeCount;
 uniform int   u_symmetry;       // 0 pure, 1 antisym, 2 cubic
@@ -817,7 +833,7 @@ float evalMode(vec4 m, float phi, vec3 q) {
 // "show field" overlay so the raymarch can colorize the field without a
 // second mode-evaluation pass.
 float fieldRaw(vec3 worldPos) {
-  vec3 q = worldPos * (3.14159265 / 5.0) / u_cellScale;
+  vec3 q = worldPos * (3.14159265 / 5.0) / (u_cellScale * u_stretch);
   float f = 0.0;
   if (u_modeCount > 0) f += evalMode(u_m0, u_p0, q);
   if (u_modeCount > 1) f += evalMode(u_m1, u_p1, q);
@@ -848,15 +864,15 @@ float fieldSDF(vec3 worldPos, out float fRaw) {
   if (u_signFlip > 0.5) cym = -cym;   // swap which phase is solid
 
   // Bounding-box SDF (negative inside box)
-  float half_ = 5.0 * u_cellScale * u_tile;
-  vec3 d = abs(worldPos) - vec3(half_);
+  vec3 half3 = 5.0 * u_cellScale * u_tile * u_stretch;
+  vec3 d = abs(worldPos) - half3;
   float boxSDF = max(max(d.x, d.y), d.z);
 
   // CSG intersection: solid only where BOTH negative
   float s = max(cym, boxSDF);
   if (u_clipAxis > 0.5) {
     float coord = (u_clipAxis < 1.5) ? worldPos.x : ((u_clipAxis < 2.5) ? worldPos.y : worldPos.z);
-    float cpw = u_clipPos * half_;
+    float cpw = u_clipPos * ((u_clipAxis < 1.5) ? half3.x : ((u_clipAxis < 2.5) ? half3.y : half3.z));
     float clip = (u_clipSide > 0.0) ? (coord - cpw) : (cpw - coord);
     s = max(s, clip);
   }
@@ -885,12 +901,12 @@ float f13Cym(vec3 p) {
 }
 float f13G;
 float f13Map(vec3 p) {
-  float half_ = 5.0 * u_cellScale * u_tile;
-  vec3 d = abs(p) - vec3(half_);
+  vec3 half3 = 5.0 * u_cellScale * u_tile * u_stretch;
+  vec3 d = abs(p) - half3;
   float s = max(f13Cym(p) / f13G, max(max(d.x, d.y), d.z));
   if (u_clipAxis > 0.5) {
     float coord = (u_clipAxis < 1.5) ? p.x : ((u_clipAxis < 2.5) ? p.y : p.z);
-    float cpw = u_clipPos * half_;
+    float cpw = u_clipPos * ((u_clipAxis < 1.5) ? half3.x : ((u_clipAxis < 2.5) ? half3.y : half3.z));
     s = max(s, (u_clipSide > 0.0) ? (coord - cpw) : (cpw - coord));
   }
   return s;
@@ -916,10 +932,11 @@ void main() {
   vec3 ro = u_rot * vec3(0.0, 0.0, u_zoom);
   vec3 rd = normalize(u_rot * vec3(uv.x, uv.y, -1.6));
 
-  // Domain box scales with tile count. Cell half-extent = 5 * cellScale.
-  float half_ = 5.0 * u_cellScale * u_tile;
-  vec3 bmin = vec3(-half_);
-  vec3 bmax = vec3( half_);
+  // Domain box scales with tile count. Cell half-extent = 5 * cellScale * stretch.
+  vec3 half3 = 5.0 * u_cellScale * u_tile * u_stretch;
+  float half_ = max(max(half3.x, half3.y), half3.z);
+  vec3 bmin = -half3;
+  vec3 bmax =  half3;
 
   float tn, tf;
   if (!rayBox(ro, rd, bmin, bmax, tn, tf)) {
@@ -993,7 +1010,7 @@ void main() {
 
   if (u_clipAxis > 0.5) {
     vec3 axM2 = vec3((u_clipAxis < 1.5) ? 1.0 : 0.0, (u_clipAxis > 1.5 && u_clipAxis < 2.5) ? 1.0 : 0.0, (u_clipAxis > 2.5) ? 1.0 : 0.0);
-    float ccp = u_clipPos * half_;
+    float ccp = u_clipPos * dot(half3, axM2);
     if (abs(dot(hitP, axM2) - ccp) < 0.02 * half_ && abs(dot(N, axM2)) > 0.7) {
       vec3 axisCol = u_clipAxis < 1.5 ? vec3(0.1333,0.8275,0.9333) : u_clipAxis < 2.5 ? vec3(0.9098,0.4745,0.9765) : vec3(0.9804,0.8000,0.0824);
       col = mix(col, axisCol, 0.30);
@@ -1136,6 +1153,7 @@ const State = {
   modes: [],   // {n,m,p,A,phi}
   iso: 0,
   cellScale: 1.0,
+  stretchX: 1.0, stretchY: 1.0, stretchZ: 1.0,   // v0.6 — the cell's relative edges
   time: 0,
   symmetry: 0,   // 0 pure, 1 antisym, 2 cubic
   tile: 1,
@@ -1463,6 +1481,9 @@ function bindSlider(id, key, fmt = (v) => v.toFixed(2), vf = false) {
 }
 bindSlider('iso', 'iso', v => v.toFixed(2), true);
 bindSlider('cellScale', 'cellScale', v => v.toFixed(2), true);
+bindSlider('stretchX', 'stretchX', v => v.toFixed(2), true);
+bindSlider('stretchY', 'stretchY', v => v.toFixed(2), true);
+bindSlider('stretchZ', 'stretchZ', v => v.toFixed(2), true);
 bindSlider('time', 'time', v => v.toFixed(2), true);
 bindSlider('quality', 'quality', v => v.toFixed(0));
 
@@ -1499,6 +1520,7 @@ function syncControls() {
   $('iso-v').textContent = State.iso.toFixed(2);
   $('cellScale').value = State.cellScale;
   $('cellScale-v').textContent = State.cellScale.toFixed(2);
+  ['stretchX', 'stretchY', 'stretchZ'].forEach(function (k) { $(k).value = State[k]; $(k + '-v').textContent = State[k].toFixed(2); });
   $('time').value = State.time;
   $('time-v').textContent = State.time.toFixed(2);
   $('sym-toggle').querySelectorAll('button').forEach(b => {
@@ -1604,6 +1626,7 @@ const U = {
   clipSide:   gl.getUniformLocation(prog, 'u_clipSide'),
   iso:        gl.getUniformLocation(prog, 'u_iso'),
   cellScale:  gl.getUniformLocation(prog, 'u_cellScale'),
+  stretch:    gl.getUniformLocation(prog, 'u_stretch'),
   time:       gl.getUniformLocation(prog, 'u_time'),
   modeCount:  gl.getUniformLocation(prog, 'u_modeCount'),
   symmetry:   gl.getUniformLocation(prog, 'u_symmetry'),
@@ -1637,13 +1660,13 @@ function rotAxisAngle(ax,ay,az,angle){const c=Math.cos(angle),s=Math.sin(angle),
 function orthonormalize(m){let x=[m[0],m[1],m[2]],y=[m[3],m[4],m[5]],z=[m[6],m[7],m[8]];const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];const scl=(a,sc)=>[a[0]*sc,a[1]*sc,a[2]*sc];const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];const nrm=a=>{const l=Math.sqrt(dot(a,a))||1;return[a[0]/l,a[1]/l,a[2]/l];};x=nrm(x);y=nrm(sub(y,scl(x,dot(y,x))));z=nrm(sub(sub(z,scl(x,dot(z,x))),scl(y,dot(z,y))));return[x[0],x[1],x[2],y[0],y[1],y[2],z[0],z[1],z[2]];}
 function applyDelta(dx,dy){if(Math.abs(dx)>0.001){const ux=rotMat[3],uy=rotMat[4],uz=rotMat[5];rotMat=mat3Mul(rotAxisAngle(ux,uy,uz,-dx*0.007),rotMat);}if(Math.abs(dy)>0.001){const rx=rotMat[0],ry=rotMat[1],rz=rotMat[2];rotMat=mat3Mul(rotAxisAngle(rx,ry,rz,-dy*0.007),rotMat);}rotMat=orthonormalize(rotMat);}
 rotMat = mat3Mul(rotAxisAngle(0,1,0,0.7), rotAxisAngle(1,0,0,0.5));
-function clipHalf(){ return 5.0 * State.cellScale * State.tile; }
+function clipHalf(){ var h = 5.0 * State.cellScale * State.tile; return [h * State.stretchX, h * State.stretchY, h * State.stretchZ]; }
 function hitHandle(cx,cy){var hs=window.__clipHandleScreen;if(!hs)return false;var rect=canvas.getBoundingClientRect();return Math.hypot((cx-rect.left)-hs.x,(cy-rect.top)-hs.y)<16;}
 function applyScrub(cx,cy){var hs=window.__clipHandleScreen;if(!hs)return;var pd=(cx-lx)*hs.dirx+(cy-ly)*hs.diry;var dPos=(pd*(hs.axisStep/(hs.len||1)))/(hs.hHalf||1);clipState.pos=Math.max(-1.0,Math.min(1.0,clipState.pos+dPos));}
 function onClipPill(axis){if(clipState.axis===axis){clipState.axis=0;}else{clipState.axis=axis;clipState.pos=0.0;clipState.side=1;}updateClipPills();requestRender();}
 function updateClipPills(){var cols={1:'#22d3ee',2:'#e879f9',3:'#facc15'},nm={1:'X',2:'Y',3:'Z'};[1,2,3].forEach(function(a){var el=document.getElementById('clipPill'+nm[a]);if(!el)return;if(clipState.axis===a){el.classList.add('active');el.style.color=cols[a];el.style.borderColor=cols[a];}else{el.classList.remove('active');el.style.color='#555';el.style.borderColor='#2a2a3a';}});}
 function drawAxisGizmo(rotMat,canvasW,canvasH,camZoom){var cv=document.getElementById('axisCanvas');if(!cv)return;var dpr=Math.min(window.devicePixelRatio||1,2);cv.width=Math.round(canvasW*dpr);cv.height=Math.round(canvasH*dpr);var ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,canvasW,canvasH);var H=Math.PI;var cx=rotMat[6],cy=rotMat[7],cz=rotMat[8];function proj(p){var tx=rotMat[0]*p[0]+rotMat[1]*p[1]+rotMat[2]*p[2];var ty=rotMat[3]*p[0]+rotMat[4]*p[1]+rotMat[5]*p[2];var tz=rotMat[6]*p[0]+rotMat[7]*p[1]+rotMat[8]*p[2];var pcz=tz-camZoom;if(pcz>-0.1)return null;var sscl=Math.min(canvasW,canvasH);return[canvasW/2+(-1.6*tx/pcz)*sscl,canvasH/2-(-1.6*ty/pcz)*sscl];}var axes=[{p:[0,H,-H],color:'#22d3ee',label:'X',vis:Math.max(cy,-cz)},{p:[-H,0,-H],color:'#e879f9',label:'Y',vis:Math.max(-cx,-cz)},{p:[-H,H,0],color:'#facc15',label:'Z',vis:Math.max(-cx,cy)}];ctx.font='bold 13px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';axes.forEach(function(ax){var alpha=Math.min(1,Math.max(0,ax.vis*4));if(alpha<0.01)return;var sp=proj(ax.p);if(!sp)return;var m=16;sp[0]=Math.max(m,Math.min(canvasW-m,sp[0]));sp[1]=Math.max(m,Math.min(canvasH-m,sp[1]));ctx.globalAlpha=alpha*0.7;ctx.fillStyle='rgba(0,0,0,1)';ctx.fillText(ax.label,sp[0]+1,sp[1]+1);ctx.globalAlpha=alpha;ctx.fillStyle=ax.color;ctx.fillText(ax.label,sp[0],sp[1]);ctx.globalAlpha=1;});}
-function drawClipHandle(rotMat,canvasW,canvasH,camZoom,hHalf){window.__clipHandleScreen=null;if(clipState.axis<1)return;var cv=document.getElementById('axisCanvas');if(!cv||cv.style.display==='none')return;var ctx=cv.getContext('2d');var H_HALF=hHalf||1;function proj(p){var tx=rotMat[0]*p[0]+rotMat[1]*p[1]+rotMat[2]*p[2];var ty=rotMat[3]*p[0]+rotMat[4]*p[1]+rotMat[5]*p[2];var tz=rotMat[6]*p[0]+rotMat[7]*p[1]+rotMat[8]*p[2];var pcz=tz-camZoom;if(pcz>-0.1)return null;var sscl=Math.min(canvasW,canvasH);return [canvasW/2+(-1.6*tx/pcz)*sscl,canvasH/2-(-1.6*ty/pcz)*sscl];}var aIdx=clipState.axis-1,cp=clipState.pos*H_HALF;var c=[0,0,0];c[aIdx]=cp;var sc=proj(c);if(!sc)return;var col=['#22d3ee','#e879f9','#facc15'][aIdx];ctx.save();var free=[0,1,2].filter(function(k){return k!==aIdx;});var sg=[[-1,-1],[1,-1],[1,1],[-1,1]];var pts=sg.map(function(g){var p=[0,0,0];p[aIdx]=cp;p[free[0]]=g[0]*H_HALF;p[free[1]]=g[1]*H_HALF;return proj(p);});if(pts.every(Boolean)){ctx.globalAlpha=0.5;ctx.lineWidth=1.5;ctx.strokeStyle=col;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);ctx.lineTo(pts[1][0],pts[1][1]);ctx.lineTo(pts[2][0],pts[2][1]);ctx.lineTo(pts[3][0],pts[3][1]);ctx.closePath();ctx.stroke();}ctx.globalAlpha=0.95;ctx.lineWidth=2;ctx.strokeStyle=col;ctx.beginPath();ctx.arc(sc[0],sc[1],9,0,6.2832);ctx.stroke();ctx.globalAlpha=1;ctx.fillStyle=col;ctx.beginPath();ctx.arc(sc[0],sc[1],3.2,0,6.2832);ctx.fill();ctx.restore();var e=[0,0,0];e[aIdx]=cp+0.4;var se=proj(e);var dirx=0,diry=0,len=0;if(se){var dx=se[0]-sc[0],dy=se[1]-sc[1];len=Math.hypot(dx,dy)||1;dirx=dx/len;diry=dy/len;}window.__clipHandleScreen={x:sc[0],y:sc[1],dirx:dirx,diry:diry,len:len,axisStep:0.4,hHalf:H_HALF};}
+function drawClipHandle(rotMat,canvasW,canvasH,camZoom,hHalf){window.__clipHandleScreen=null;if(clipState.axis<1)return;var cv=document.getElementById('axisCanvas');if(!cv||cv.style.display==='none')return;var ctx=cv.getContext('2d');var HH=Array.isArray(hHalf)?hHalf:[hHalf||1,hHalf||1,hHalf||1];function proj(p){var tx=rotMat[0]*p[0]+rotMat[1]*p[1]+rotMat[2]*p[2];var ty=rotMat[3]*p[0]+rotMat[4]*p[1]+rotMat[5]*p[2];var tz=rotMat[6]*p[0]+rotMat[7]*p[1]+rotMat[8]*p[2];var pcz=tz-camZoom;if(pcz>-0.1)return null;var sscl=Math.min(canvasW,canvasH);return [canvasW/2+(-1.6*tx/pcz)*sscl,canvasH/2-(-1.6*ty/pcz)*sscl];}var aIdx=clipState.axis-1,H_HALF=HH[aIdx],cp=clipState.pos*H_HALF;var c=[0,0,0];c[aIdx]=cp;var sc=proj(c);if(!sc)return;var col=['#22d3ee','#e879f9','#facc15'][aIdx];ctx.save();var free=[0,1,2].filter(function(k){return k!==aIdx;});var sg=[[-1,-1],[1,-1],[1,1],[-1,1]];var pts=sg.map(function(g){var p=[0,0,0];p[aIdx]=cp;p[free[0]]=g[0]*HH[free[0]];p[free[1]]=g[1]*HH[free[1]];return proj(p);});if(pts.every(Boolean)){ctx.globalAlpha=0.5;ctx.lineWidth=1.5;ctx.strokeStyle=col;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);ctx.lineTo(pts[1][0],pts[1][1]);ctx.lineTo(pts[2][0],pts[2][1]);ctx.lineTo(pts[3][0],pts[3][1]);ctx.closePath();ctx.stroke();}ctx.globalAlpha=0.95;ctx.lineWidth=2;ctx.strokeStyle=col;ctx.beginPath();ctx.arc(sc[0],sc[1],9,0,6.2832);ctx.stroke();ctx.globalAlpha=1;ctx.fillStyle=col;ctx.beginPath();ctx.arc(sc[0],sc[1],3.2,0,6.2832);ctx.fill();ctx.restore();var e=[0,0,0];e[aIdx]=cp+0.4;var se=proj(e);var dirx=0,diry=0,len=0;if(se){var dx=se[0]-sc[0],dy=se[1]-sc[1];len=Math.hypot(dx,dy)||1;dirx=dx/len;diry=dy/len;}window.__clipHandleScreen={x:sc[0],y:sc[1],dirx:dirx,diry:diry,len:len,axisStep:0.4,hHalf:H_HALF};}
 
 // ---- Resize ----
 function resize() {
@@ -1736,6 +1759,7 @@ function render() {
   if (U.clipSide) gl.uniform1f(U.clipSide, clipState.side);
   gl.uniform1f(U.iso, State.iso);
   gl.uniform1f(U.cellScale, State.cellScale);
+  gl.uniform3f(U.stretch, State.stretchX, State.stretchY, State.stretchZ);
   gl.uniform1f(U.time, State.time);
   gl.uniform1i(U.symmetry, State.symmetry);
   gl.uniform1f(U.tile, State.tile);
@@ -1830,20 +1854,22 @@ function f13ldWaveEvalRaw(modes, sym, t, qx, qy, qz) {
 }
 
 function f13ldWaveBake(p, N) {
+  /* v0.6 — a stretched cell: the same q grid ([-pi, pi] per axis), with
+     physical voxel edges dxv[i] = 10 · cellScale · stretch[i] / N */
+  var st = p.stretch || [1, 1, 1];
   var halfWorld = 5.0 * p.cellScale;
-  var dx = (2 * halfWorld) / N;
-  var qScale = Math.PI / 5.0 / p.cellScale;
+  var hv = [halfWorld * st[0], halfWorld * st[1], halfWorld * st[2]];
+  var dxv = [2 * hv[0] / N, 2 * hv[1] / N, 2 * hv[2] / N];
+  var dx = Math.cbrt(dxv[0] * dxv[1] * dxv[2]);
+  var qd = 2 * Math.PI / N;
   var field = new Float32Array(N*N*N);
   var fmin = Infinity, fmax = -Infinity, sumSq = 0;
   for (var iz = 0; iz < N; iz++) {
-    var z = (iz + 0.5) * dx - halfWorld;
-    var qz = z * qScale;
+    var qz = (iz + 0.5) * qd - Math.PI;
     for (var iy = 0; iy < N; iy++) {
-      var y = (iy + 0.5) * dx - halfWorld;
-      var qy = y * qScale;
+      var qy = (iy + 0.5) * qd - Math.PI;
       for (var ix = 0; ix < N; ix++) {
-        var x = (ix + 0.5) * dx - halfWorld;
-        var qx = x * qScale;
+        var qx = (ix + 0.5) * qd - Math.PI;
         var f = f13ldWaveEvalRaw(p.modes, p.sym, p.time, qx, qy, qz);
         field[ix + iy*N + iz*N*N] = f;
         if (f < fmin) fmin = f;
@@ -1853,7 +1879,7 @@ function f13ldWaveBake(p, N) {
     }
   }
   var RMS = Math.sqrt(sumSq / (N*N*N));
-  return { field: field, fmin: fmin, fmax: fmax, RMS: RMS, dx: dx, halfWorld: halfWorld };
+  return { field: field, fmin: fmin, fmax: fmax, RMS: RMS, dx: dx, dxv: dxv, halfWorld: halfWorld, hv: hv };
 }
 
 function f13ldWaveMetrics(p, baked, N) {
@@ -1869,24 +1895,29 @@ function f13ldWaveMetrics(p, baked, N) {
     if (ci < 0) nSolid++;
   }
   var VF = nSolid / (N*N*N);
-  var nSurface = 0;
-  var dxInv = 1.0 / (2 * dx);
+  /* surface area: each voxel within half a voxel (measured along the
+     normal, per-axis edges dxv) of the surface adds dV / h_n */
+  var dxv = baked.dxv || [dx, dx, dx], dV = dxv[0] * dxv[1] * dxv[2];
+  var SA = 0;
+  var ix2 = 1 / (2 * dxv[0]), iy2 = 1 / (2 * dxv[1]), iz2 = 1 / (2 * dxv[2]);
   for (var iz = 1; iz < N-1; iz++) {
     for (var iy = 1; iy < N-1; iy++) {
       var rowBase = iy*N + iz*N*N;
       for (var ix = 1; ix < N-1; ix++) {
         var idx = ix + rowBase;
         var c = cym[idx];
-        var gx = (cym[idx+1]   - cym[idx-1])   * dxInv;
-        var gy = (cym[idx+N]   - cym[idx-N])   * dxInv;
-        var gz = (cym[idx+N*N] - cym[idx-N*N]) * dxInv;
+        var gx = (cym[idx+1]   - cym[idx-1])   * ix2;
+        var gy = (cym[idx+N]   - cym[idx-N])   * iy2;
+        var gz = (cym[idx+N*N] - cym[idx-N*N]) * iz2;
         var gm = Math.sqrt(gx*gx + gy*gy + gz*gz);
-        if (Math.abs(c) < dx * gm * 0.5) nSurface++;
+        if (gm <= 0) continue;
+        var hn = Math.sqrt(Math.pow(dxv[0] * gx, 2) + Math.pow(dxv[1] * gy, 2) + Math.pow(dxv[2] * gz, 2)) / gm;
+        if (Math.abs(c) < hn * gm * 0.5) SA += dV / hn;
       }
     }
   }
-  var SA = nSurface * dx * dx;
-  var V_cell = Math.pow(2 * baked.halfWorld, 3);
+  var hv = baked.hv || [baked.halfWorld, baked.halfWorld, baked.halfWorld];
+  var V_cell = 8 * hv[0] * hv[1] * hv[2];
   var SSA = SA / V_cell;
   var degenerate = baked.RMS < 1e-4;
   return {
@@ -1897,7 +1928,7 @@ function f13ldWaveMetrics(p, baked, N) {
 }
 
 function f13ldWaveCacheKey(p) {
-  var s = p.sym + "|" + p.time.toFixed(6) + "|" + p.cellScale.toFixed(6) + "|";
+  var s = p.sym + "|" + p.time.toFixed(6) + "|" + p.cellScale.toFixed(6) + "|" + (p.stretch || [1, 1, 1]).join(",") + "|";
   for (var i = 0; i < p.modes.length; i++) {
     var m = p.modes[i];
     s += m.n + "," + m.m + "," + m.p + "," + m.A.toFixed(6) + "," + ((m.phi || 0)).toFixed(6) + ";";
@@ -2042,6 +2073,7 @@ function computeVF() {
       sym: State.symmetry,
       time: State.time,
       cellScale: State.cellScale,
+      stretch: [State.stretchX, State.stretchY, State.stretchZ],
       iso: State.iso,
       thickness: State.thickness,
       sheetMode: State.sheetMode ? 1 : 0,
@@ -2105,6 +2137,7 @@ function waveHomogParams() {
     sym: State.symmetry,
     time: State.time,
     cellScale: State.cellScale,
+    stretch: [State.stretchX, State.stretchY, State.stretchZ],
     iso: State.iso,
     thickness: State.thickness,
     sheetMode: State.sheetMode ? 1 : 0,
@@ -2160,6 +2193,7 @@ function waveHsPlus(Es, nu, rho) {
 function waveSurfaceAreaDensity(p, N) {
   var Nhi = Math.min(N * 3, 96), half = 5.0 * p.cellScale, step = 2 * half / Nhi;
   var qScale = Math.PI / 5.0 / p.cellScale, N2hi = Nhi * Nhi;
+  var sS = p.stretch || [1, 1, 1];   /* v0.6 — sampled on the q grid; faces weighted by their stretched area below */
   var vhi = new Uint8Array(Nhi * Nhi * Nhi);
   for (var ix = 0; ix < Nhi; ix++) {
     var x = -half + (ix + 0.5) * step, qx = x * qScale;
@@ -2174,13 +2208,15 @@ function waveSurfaceAreaDensity(p, N) {
       }
     }
   }
-  var ifaces = 0;
+  var ifX = 0, ifY = 0, ifZ = 0;
   for (var ax = 0; ax < Nhi; ax++) for (var ay = 0; ay < Nhi; ay++) for (var az = 0; az < Nhi; az++) {
     var v = vhi[ax * N2hi + ay * Nhi + az];
-    if (v !== vhi[((ax + 1) % Nhi) * N2hi + ay * Nhi + az]) ifaces++;
-    if (v !== vhi[ax * N2hi + ((ay + 1) % Nhi) * Nhi + az]) ifaces++;
-    if (v !== vhi[ax * N2hi + ay * Nhi + ((az + 1) % Nhi)]) ifaces++;
+    if (v !== vhi[((ax + 1) % Nhi) * N2hi + ay * Nhi + az]) ifX++;
+    if (v !== vhi[ax * N2hi + ((ay + 1) % Nhi) * Nhi + az]) ifY++;
+    if (v !== vhi[ax * N2hi + ay * Nhi + ((az + 1) % Nhi)]) ifZ++;
   }
+  /* a face normal to x has area ∝ s_y·s_z; scale-free: ÷ (s_x s_y s_z)^(2/3) */
+  var ifaces = (ifX * sS[1] * sS[2] + ifY * sS[0] * sS[2] + ifZ * sS[0] * sS[1]) / Math.pow(sS[0] * sS[1] * sS[2], 2 / 3);
   return (ifaces / (Nhi * Nhi * 2 * Math.PI)) * (Math.PI / 2);
 }
 
@@ -2193,11 +2229,18 @@ function runWaveHomog(N, Es, nu) {
   var rho = sm.nSolid / (N * N * N);
   if (rho < 1e-4 || rho > 0.9999) return { degenerate: true, rho: rho };
   var mil = waveComputeMIL(sm.mask, N);
-  var hx = mil.milX * mil.milX, hy = mil.milY * mil.milY, hz = mil.milZ * mil.milZ;
+  /* v0.6 — intercept lengths in physical units on a stretched cell (the
+     q grid is the same; each axis's voxels are stretch[i] long) */
+  var stH = p.stretch || [1, 1, 1];
+  var hx = Math.pow(mil.milX * stH[0], 2), hy = Math.pow(mil.milY * stH[1], 2), hz = Math.pow(mil.milZ * stH[2], 2);
   var hmean = (hx + hy + hz) / 3;
   var wx = hx / hmean, wy = hy / hmean, wz = hz / hmean;
   var hs = waveHsPlus(Es, nu, rho);
   var Ex = hs.Ehsp * wx, Ey = hs.Ehsp * wy, Ez = hs.Ehsp * wz;
+  /* v0.6 — the fabric weights can push a stretched cell's stiff axis past
+     the Voigt bound (solid fraction × Es), which no structure can exceed */
+  var voigt = rho * Es;
+  Ex = Math.min(Ex, voigt); Ey = Math.min(Ey, voigt); Ez = Math.min(Ez, voigt);
   var Gxy = hs.Gp * Math.sqrt(wx * wy);
   var nuEff = nu * (1 - rho);
   var aniso = Math.max(Ex, Ey, Ez) / Math.max(Math.min(Ex, Ey, Ez), 1e-9);
@@ -2410,7 +2453,7 @@ function buildExportJSON() {
     schema: "f13ld.wave/v1",
     tool: "F13LD.wave",
     family: "wave",
-    version: "0.3",
+    version: "0.6",
     timestamp: new Date().toISOString(),
     field: {
       symmetry: symLabels[State.symmetry],
@@ -2421,6 +2464,7 @@ function buildExportJSON() {
       thickness: State.sheetMode ? State.thickness : null,
       iso: State.iso,
       cellScale: State.cellScale,
+      stretch: [State.stretchX, State.stretchY, State.stretchZ],
       phaseTime: State.time,
       modes: State.modes.map(m => ({
         n: m.n, m: m.m, p: m.p, A: m.A, phi: m.phi || 0
@@ -2430,6 +2474,7 @@ function buildExportJSON() {
       unit: "mm",
       size: 10.0 * State.cellScale,
       bounds: [-5 * State.cellScale, 5 * State.cellScale],
+      size_xyz: [10.0 * State.cellScale * State.stretchX, 10.0 * State.cellScale * State.stretchY, 10.0 * State.cellScale * State.stretchZ],
     },
     coordinate: {
       convention: "f13ld",
@@ -2678,6 +2723,10 @@ requestRender();
         what:'Spatial frequency of the waves \u2014 how many unit cells fill the domain.',
         see:'Larger = coarser, bigger cells; smaller = finer, more repeats.',
         why:'Sets pore size and feature scale \u2014 transport, infiltration, and the smallest printable feature live here.' },
+      { id:'stretchX', label:'stretch x / y / z', range:'0.5 \u2013 2', rowAnchor:'#stretchX',
+        what:'Stretches the unit cell along each axis \u2014 the waves keep one period per cell edge, so the cell becomes a box.',
+        see:'The pattern elongates along the stretched axis; tiles stay seamless.',
+        why:'Breaks the equal-axis stiffness of the symmetric modes (Cubic, Chiral, Schoen give Ex = Ey = Ez on a cube) \u2014 your anisotropy dial. F13LD.sweep and F13LD.mesh read it; F13LD.lab still solves a cube.' },
       { id:'time', label:'phase \u03c9t', range:'0 \u2013 2\u03c0', rowAnchor:'#time',
         what:'Temporal phase of the standing wave. \u25b6 Animate sweeps it.',
         see:'The structure breathes through a cycle and returns \u2014 nodes fixed, antinodes pulsing.',
