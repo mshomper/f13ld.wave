@@ -162,7 +162,7 @@ The exported JSON carries the complete parameter set, the live metrics, and — 
   "schema": "f13ld.wave/v1",
   "tool": "F13LD.wave",
   "family": "wave",
-  "version": "0.3",
+  "version": "0.6",
   "timestamp": "...",
   "field": {
     "symmetry": "pure",
