@@ -529,12 +529,6 @@ body .f13h-close{width:44px;height:44px}
               <button type="button" id="tile-b3" data-tile="3">3×3×3</button>
             </div>
           </div>
-          <!-- quality goes in the render stage (automatic) -->
-          <div class="row sc-group sl" id="grp-quality">
-            <label for="quality">quality</label>
-            <span class="sv" id="quality-v">96</span>
-            <input type="range" id="quality" min="48" max="192" step="8" value="96">
-          </div>
         </div>
       </section>
 
@@ -1048,7 +1042,6 @@ const State = {
   time: 0,
   symmetry: 0,   // 0 pure, 1 antisym, 2 cubic
   tile: 1,
-  quality: 96,
   animate: false,
   signFlip: 0,   // 0 = phase A (f > iso solid), 1 = phase B (f < iso solid)
   sheetMode: 0,  // 0 = solid, 1 = thin shell
@@ -1375,13 +1368,13 @@ bindSlider('stretchX', 'stretchX', v => v.toFixed(2), true);
 bindSlider('stretchY', 'stretchY', v => v.toFixed(2), true);
 bindSlider('stretchZ', 'stretchZ', v => v.toFixed(2), true);
 bindSlider('time', 'time', v => v.toFixed(2), true);
-bindSlider('quality', 'quality', v => v.toFixed(0));
 
 // ---- Play/animate ----
 $('play').addEventListener('click', () => {
   State.animate = !State.animate;
   setPlayButton();
-  if (State.animate) animLoop();
+  animLast = 0;
+  requestRender();   // Animate is driven by the on-demand frame loop
 });
 // play/pause button: drawn icons swap by class (.on shows the pause icon)
 function setPlayButton() {
@@ -1391,13 +1384,20 @@ function setPlayButton() {
   b.querySelector('span').textContent = State.animate ? 'Pause' : 'Animate';
 }
 
-function animLoop() {
-  if (!State.animate) return;
-  State.time = (State.time + 0.015) % (Math.PI * 2);
+// Animate: advance the phase from the frame loop (see frame()); 0.9 rad/s as before (0.015 rad per 60 Hz frame)
+let animLast = 0;
+const ANIM_RATE = 0.9;
+function animStep(ts) {
+  // at most ~60 frames/s; under Reduce Motion the phase steps at 8 frames/s instead of gliding
+  const minGap = REDUCE_MOTION.matches ? 125 : 14;
+  if (!animLast) { animLast = ts; return false; }
+  const d = ts - animLast;
+  if (d < minGap) return false;
+  animLast = ts;
+  State.time = (State.time + ANIM_RATE * Math.min(d / 1000, 0.1)) % (Math.PI * 2);
   $('time').value = State.time;
   $('time-v').textContent = State.time.toFixed(2);
-  requestRender();
-  requestAnimationFrame(animLoop);
+  return true;
 }
 
 // ---- Preset dropdown ----
@@ -1452,9 +1452,13 @@ if (!gl) {
 }
 
 // Non-blocking shader-compile extension (works in WebGL 1 + 2)
-const KHR_PSC = gl ? gl.getExtension('KHR_parallel_shader_compile') : null;
+let KHR_PSC = null;   // re-queried by glInit() (extension objects die with a lost context)
+
+// frame counters (tests / profiling): compile counts every shader compile of the main view
+const drawStats = { int: 0, rest: 0, glyph: 0, compile: 0, restStrips: 0 };
 
 function compile(type, src) {
+  drawStats.compile++;
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
@@ -1465,15 +1469,20 @@ function compile(type, src) {
   return sh;
 }
 
-const vs = compile(gl.VERTEX_SHADER,   $('vs').textContent);
-const fs = compile(gl.FRAGMENT_SHADER, $('fs').textContent.replace('// @F13_SHADE_GLSL', F13_SHADE_GLSL));
-const prog = gl.createProgram();
-gl.attachShader(prog, vs);
-gl.attachShader(prog, fs);
-gl.linkProgram(prog);
+// GL resources are built by glInit() (below): once at boot, and again if the context is lost and restored.
+let vs, fs, prog, buf, a_pos, U = {};
+let progReady = false;
+function glBuildProgram() {
+  vs = compile(gl.VERTEX_SHADER,   $('vs').textContent);
+  fs = compile(gl.FRAGMENT_SHADER, $('fs').textContent.replace('// @F13_SHADE_GLSL', F13_SHADE_GLSL));
+  prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  progReady = false;
+}
 
 // Async link verification — checked once before first useProgram.
-let progReady = false;
 function ensureProgReady() {
   if (progReady) return true;
   if (KHR_PSC) {
@@ -1500,18 +1509,20 @@ function ensureProgReady() {
 }
 
 // Full-screen quad
-const buf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1, -1,   1, -1,   -1, 1,
-  -1,  1,   1, -1,    1, 1,
-]), gl.STATIC_DRAW);
-const a_pos = gl.getAttribLocation(prog, 'a_pos');
-gl.enableVertexAttribArray(a_pos);
-gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+function glBuildBuffers() {
+  buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,   1, -1,   -1, 1,
+    -1,  1,   1, -1,    1, 1,
+  ]), gl.STATIC_DRAW);
+  a_pos = gl.getAttribLocation(prog, 'a_pos');
+  gl.enableVertexAttribArray(a_pos);
+  gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+}
 
 // Uniforms
-const U = {
+function glBuildUniforms() { U = {
   resolution: gl.getUniformLocation(prog, 'u_resolution'),
   rot:        gl.getUniformLocation(prog, 'u_rot'),
   zoom:       gl.getUniformLocation(prog, 'u_zoom'),
@@ -1542,7 +1553,14 @@ const U = {
   p3: gl.getUniformLocation(prog, 'u_p3'),
   p4: gl.getUniformLocation(prog, 'u_p4'),
   p5: gl.getUniformLocation(prog, 'u_p5'),
-};
+}; }
+function glInit() {
+  KHR_PSC = gl.getExtension('KHR_parallel_shader_compile');
+  glBuildProgram();
+  glBuildBuffers();
+  glBuildUniforms();
+}
+glInit();
 
 // ---- Camera (suite orbit model: rotation matrix + zoom) ----
 let rotMat = [1,0,0,0,1,0,0,0,1];
@@ -1559,28 +1577,42 @@ function hitHandle(cx,cy){var hs=window.__clipHandleScreen;if(!hs)return false;v
 function applyScrub(cx,cy){var hs=window.__clipHandleScreen;if(!hs)return;var pd=(cx-lx)*hs.dirx+(cy-ly)*hs.diry;var dPos=(pd*(hs.axisStep/(hs.len||1)))/(hs.hHalf||1);clipState.pos=Math.max(-1.0,Math.min(1.0,clipState.pos+dPos));}
 function onClipPill(axis){if(clipState.axis===axis){clipState.axis=0;}else{clipState.axis=axis;clipState.pos=0.0;clipState.side=1;}updateClipPills();requestRender();}
 function updateClipPills(){if(window.F13UI&&F13UI.onClipChange)try{F13UI.onClipChange(clipState.axis);}catch(e){console.error(e);}var cols={1:'#22d3ee',2:'#e879f9',3:'#facc15'},nm={1:'X',2:'Y',3:'Z'};[1,2,3].forEach(function(a){var el=document.getElementById('clipPill'+nm[a]);if(!el)return;if(clipState.axis===a){el.classList.add('active');el.style.color=cols[a];el.style.borderColor=cols[a];}else{el.classList.remove('active');el.style.color='';el.style.borderColor='';}});}
-function drawAxisGizmo(rotMat,canvasW,canvasH,camZoom){var cv=document.getElementById('axisCanvas');if(!cv)return;var dpr=Math.min(window.devicePixelRatio||1,2);cv.width=Math.round(canvasW*dpr);cv.height=Math.round(canvasH*dpr);var ctx=cv.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,canvasW,canvasH);var H=Math.PI;var cx=rotMat[6],cy=rotMat[7],cz=rotMat[8];function proj(p){var tx=rotMat[0]*p[0]+rotMat[1]*p[1]+rotMat[2]*p[2];var ty=rotMat[3]*p[0]+rotMat[4]*p[1]+rotMat[5]*p[2];var tz=rotMat[6]*p[0]+rotMat[7]*p[1]+rotMat[8]*p[2];var pcz=tz-camZoom;if(pcz>-0.1)return null;var sscl=Math.min(canvasW,canvasH);return[canvasW/2+(-1.6*tx/pcz)*sscl,canvasH/2-(-1.6*ty/pcz)*sscl];}var axes=[{p:[0,H,-H],color:'#22d3ee',label:'X',vis:Math.max(cy,-cz)},{p:[-H,0,-H],color:'#e879f9',label:'Y',vis:Math.max(-cx,-cz)},{p:[-H,H,0],color:'#facc15',label:'Z',vis:Math.max(-cx,cy)}];ctx.font='bold 13px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';axes.forEach(function(ax){var alpha=Math.min(1,Math.max(0,ax.vis*4));if(alpha<0.01)return;var sp=proj(ax.p);if(!sp)return;var m=16;sp[0]=Math.max(m,Math.min(canvasW-m,sp[0]));sp[1]=Math.max(m,Math.min(canvasH-m,sp[1]));ctx.globalAlpha=alpha*0.7;ctx.fillStyle='rgba(0,0,0,1)';ctx.fillText(ax.label,sp[0]+1,sp[1]+1);ctx.globalAlpha=alpha;ctx.fillStyle=ax.color;ctx.fillText(ax.label,sp[0],sp[1]);ctx.globalAlpha=1;});}
+function drawAxisGizmo(rotMat,canvasW,canvasH,camZoom){var cv=document.getElementById('axisCanvas');if(!cv)return;var dpr=Math.min(window.devicePixelRatio||1,2);sizeGizmo();var ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,canvasW,canvasH);var H=Math.PI;var cx=rotMat[6],cy=rotMat[7],cz=rotMat[8];function proj(p){var tx=rotMat[0]*p[0]+rotMat[1]*p[1]+rotMat[2]*p[2];var ty=rotMat[3]*p[0]+rotMat[4]*p[1]+rotMat[5]*p[2];var tz=rotMat[6]*p[0]+rotMat[7]*p[1]+rotMat[8]*p[2];var pcz=tz-camZoom;if(pcz>-0.1)return null;var sscl=Math.min(canvasW,canvasH);return[canvasW/2+(-1.6*tx/pcz)*sscl,canvasH/2-(-1.6*ty/pcz)*sscl];}var axes=[{p:[0,H,-H],color:'#22d3ee',label:'X',vis:Math.max(cy,-cz)},{p:[-H,0,-H],color:'#e879f9',label:'Y',vis:Math.max(-cx,-cz)},{p:[-H,H,0],color:'#facc15',label:'Z',vis:Math.max(-cx,cy)}];ctx.font='bold 13px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';axes.forEach(function(ax){var alpha=Math.min(1,Math.max(0,ax.vis*4));if(alpha<0.01)return;var sp=proj(ax.p);if(!sp)return;var m=16;sp[0]=Math.max(m,Math.min(canvasW-m,sp[0]));sp[1]=Math.max(m,Math.min(canvasH-m,sp[1]));ctx.globalAlpha=alpha*0.7;ctx.fillStyle='rgba(0,0,0,1)';ctx.fillText(ax.label,sp[0]+1,sp[1]+1);ctx.globalAlpha=alpha;ctx.fillStyle=ax.color;ctx.fillText(ax.label,sp[0],sp[1]);ctx.globalAlpha=1;});}
 function drawClipHandle(rotMat,canvasW,canvasH,camZoom,hHalf){window.__clipHandleScreen=null;if(clipState.axis<1)return;var cv=document.getElementById('axisCanvas');if(!cv||cv.style.display==='none')return;var ctx=cv.getContext('2d');var HH=Array.isArray(hHalf)?hHalf:[hHalf||1,hHalf||1,hHalf||1];function proj(p){var tx=rotMat[0]*p[0]+rotMat[1]*p[1]+rotMat[2]*p[2];var ty=rotMat[3]*p[0]+rotMat[4]*p[1]+rotMat[5]*p[2];var tz=rotMat[6]*p[0]+rotMat[7]*p[1]+rotMat[8]*p[2];var pcz=tz-camZoom;if(pcz>-0.1)return null;var sscl=Math.min(canvasW,canvasH);return [canvasW/2+(-1.6*tx/pcz)*sscl,canvasH/2-(-1.6*ty/pcz)*sscl];}var aIdx=clipState.axis-1,H_HALF=HH[aIdx],cp=clipState.pos*H_HALF;var c=[0,0,0];c[aIdx]=cp;var sc=proj(c);if(!sc)return;var col=['#22d3ee','#e879f9','#facc15'][aIdx];ctx.save();var free=[0,1,2].filter(function(k){return k!==aIdx;});var sg=[[-1,-1],[1,-1],[1,1],[-1,1]];var pts=sg.map(function(g){var p=[0,0,0];p[aIdx]=cp;p[free[0]]=g[0]*HH[free[0]];p[free[1]]=g[1]*HH[free[1]];return proj(p);});if(pts.every(Boolean)){ctx.globalAlpha=0.5;ctx.lineWidth=1.5;ctx.strokeStyle=col;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);ctx.lineTo(pts[1][0],pts[1][1]);ctx.lineTo(pts[2][0],pts[2][1]);ctx.lineTo(pts[3][0],pts[3][1]);ctx.closePath();ctx.stroke();}ctx.globalAlpha=0.95;ctx.lineWidth=2;ctx.strokeStyle=col;ctx.beginPath();ctx.arc(sc[0],sc[1],9,0,6.2832);ctx.stroke();ctx.globalAlpha=1;ctx.fillStyle=col;ctx.beginPath();ctx.arc(sc[0],sc[1],3.2,0,6.2832);ctx.fill();ctx.restore();var e=[0,0,0];e[aIdx]=cp+0.4;var se=proj(e);var dirx=0,diry=0,len=0;if(se){var dx=se[0]-sc[0],dy=se[1]-sc[1];len=Math.hypot(dx,dy)||1;dirx=dx/len;diry=dy/len;}window.__clipHandleScreen={x:sc[0],y:sc[1],dirx:dirx,diry:diry,len:len,axisStep:0.4,hHalf:H_HALF};}
 
 // ---- Resize ----
+// The drawing buffer is fixed at CSS size x min(DPR, 2) and only changes when the pane really
+// changes size; quality tiers never resize it (resizing between tiers is very expensive at DPR 2).
+const DPR_MAX = 2;
+const gizmoSize = { w: 0, h: 0, dpr: 0 };
+function sizeGizmo() {
+  const cv = document.getElementById('axisCanvas'); if (!cv) return;
+  const w = canvas.clientWidth, h = canvas.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (gizmoSize.w === w && gizmoSize.h === h && gizmoSize.dpr === dpr) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  gizmoSize.w = w; gizmoSize.h = h; gizmoSize.dpr = dpr;
+}
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-  const w = canvas.clientWidth  * dpr;
-  const h = canvas.clientHeight * dpr;
-  if (canvas.width !== w || canvas.height !== h) {
+  const dpr = Math.min(window.devicePixelRatio || 1, DPR_MAX);
+  const w = Math.round(canvas.clientWidth * dpr);
+  const h = Math.round(canvas.clientHeight * dpr);
+  sizeGizmo();
+  if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
     canvas.width = w;
     canvas.height = h;
-    gl.viewport(0, 0, w, h);
+    return true;
   }
+  return false;
 }
-window.addEventListener('resize', () => { resize(); requestRender(); });
+window.addEventListener('resize', () => requestRender());
+if (window.ResizeObserver) new ResizeObserver(() => requestRender()).observe(canvas.parentElement);
 
 // ---- Mouse interaction ----
 canvas.addEventListener('mousedown', (e) => {
   lx = e.clientX; ly = e.clientY;
   if (hitHandle(e.clientX, e.clientY)) { scrub = true; } else { drag = true; }
 });
-window.addEventListener('mouseup', () => { drag = false; scrub = false; });
+window.addEventListener('mouseup', () => { if (drag || scrub) lastInteract = performance.now(); drag = false; scrub = false; });
 window.addEventListener('mousemove', (e) => {
   if (scrub) { applyScrub(e.clientX, e.clientY); lx = e.clientX; ly = e.clientY; requestRender(); }
   else if (drag) { applyDelta(e.clientX - lx, e.clientY - ly); lx = e.clientX; ly = e.clientY; requestRender(); }
@@ -1623,29 +1655,177 @@ canvas.addEventListener('touchmove', (e) => {
     lastTouchDist = dist;
   }
 }, { passive: false });
-canvas.addEventListener('touchend', (e) => { e.preventDefault(); drag = false; scrub = false; lastTouchDist = 0; }, { passive: false });
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); lastInteract = performance.now(); drag = false; scrub = false; lastTouchDist = 0; }, { passive: false });
 canvas.addEventListener('touchcancel', () => { drag = false; scrub = false; lastTouchDist = 0; });
 
 // ---- Render ----
-let renderScheduled = false;
-function requestRender() {
-  if (renderScheduled) return;
-  renderScheduled = true;
-  requestAnimationFrame(render);
+// ── Adaptive render quality (replaces the Quality slider) ───────────────
+// The ray-march step count is a uniform, so quality never recompiles. While the user orbits,
+// zooms, drags the clip handle, edits any control or plays Animate, frames use Q_INT, drawn into
+// an offscreen framebuffer at an adaptive scale (AQ.scale, 0.4-0.85, held near the display rate)
+// and upscaled with blitFramebuffer (LINEAR). ~150 ms after the last interaction one rest frame
+// is drawn with Q_REST (the old top quality) at full canvas resolution, in strips over several
+// frames, and blitted once. Rendering is on demand: the loop sleeps until something changes.
+// WebGL 1 has no blitFramebuffer, so it stays single tier (direct draws).
+const Q_INT = { steps: 160 }, Q_REST = { steps: 192 };
+const IDLE_MS = 150;
+const AQ = { scale: 0.7, min: 0.4, max: 0.85, cap: 0.85, ema: 0, prev: 0, vsync: 16.7, lastTick: 0, pxCost: 0 };
+let renderDirty = true, refinePending = false, lastInteract = 0, lastTs = 0, loopOn = false, drawingInt = false, glLost = false;
+const REDUCE_MOTION = window.matchMedia('(prefers-reduced-motion:reduce)');
+function wakeLoop() { if (!loopOn && !glLost) { loopOn = true; lastTs = 0; requestAnimationFrame(frame); } }
+// any change to what the main view shows: a quick frame now, a refined one when idle
+function requestRender() { lastInteract = performance.now(); renderDirty = true; wakeLoop(); }
+// the F13LD-VIEW menu redraws when an interaction ends (shadows come back) and when an option is toggled
+function viewRedraw() {
+  if (performance.now() - lastInteract < 400) { refinePending = true; wakeLoop(); }   // end of an interaction: the rest frame brings the shadows
+  else requestRender();                                                              // option toggled
 }
 
-function render() {
-  renderScheduled = false;
-  // Wait for async link to verify before drawing. With KHR_parallel_shader_compile
-  // this avoids a sync stall on first frame; without the extension it's a one-time
-  // pass-through.
-  if (!ensureProgReady()) {
-    requestAnimationFrame(render);
-    return;
-  }
-  resize();
+// Offscreen colour targets, reallocated only when the canvas size really changes.
+function makeTarget(t, w, h) {
+  if (t.fb && t.w === w && t.h === h) return true;
+  if (!t.fb) { t.fb = gl.createFramebuffer(); t.rb = gl.createRenderbuffer(); }
+  gl.bindRenderbuffer(gl.RENDERBUFFER, t.rb);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, w, h);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, t.rb);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  t.w = w; t.h = h;
+  if (!ok) { gl.deleteFramebuffer(t.fb); gl.deleteRenderbuffer(t.rb); t.fb = null; }
+  return ok;
+}
+// interactive target: allocated at AQ.max of the canvas, so scale changes only move the viewport
+const lowFB = { fb: null, rb: null, w: 0, h: 0 };
+function ensureLowFB() { return IS_WEBGL2 && makeTarget(lowFB, Math.max(1, Math.ceil(canvas.width * AQ.max)), Math.max(1, Math.ceil(canvas.height * AQ.max))); }
+// rest target: full canvas resolution
+const hiFB = { fb: null, rb: null, w: 0, h: 0 };
+function ensureHiFB() { return IS_WEBGL2 && makeTarget(hiFB, canvas.width, canvas.height); }
 
-  gl.uniform2f(U.resolution, canvas.width, canvas.height);
+// Adaptive scale from an EMA of frame-to-frame time of consecutive interactive frames: slower than
+// ~20 ms (or 1.6 display frames) lowers the scale; at the display rate it creeps back up, never
+// above the last scale that was too slow.
+function aqSample(ts) {
+  if (AQ.prev && ts - AQ.prev < 250) {
+    const d = ts - AQ.prev; AQ.ema = AQ.ema ? AQ.ema * 0.7 + d * 0.3 : d;
+    AQ.pxCost = AQ.ema / Math.max(1, canvas.width * canvas.height * AQ.scale * AQ.scale);   // ms per interactive pixel (upper bound: includes the vsync wait)
+    const fast = Math.max(12, AQ.vsync * 1.2), slow = Math.max(20, AQ.vsync * 1.6);
+    if (AQ.ema > slow) { AQ.cap = Math.max(AQ.min, AQ.scale - 0.03); AQ.scale = Math.max(AQ.min, AQ.scale * 0.88); AQ.ema = 0; }
+    else if (AQ.ema < fast && AQ.scale < AQ.cap) AQ.scale = Math.min(AQ.cap, AQ.scale + 0.01);
+  }
+  AQ.prev = ts;
+}
+
+// One draw of the scene into `fb` (null = the canvas) at W x H, optionally only rows strip[0]..strip[1].
+function sceneDraw(fb, W, H, Q, strip) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.viewport(0, 0, W, H);
+  if (strip) { gl.enable(gl.SCISSOR_TEST); gl.scissor(0, strip[0], W, strip[1] - strip[0]); }
+  setSceneUniforms(W, H, Q.steps);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  if (strip) gl.disable(gl.SCISSOR_TEST);
+  if (fb) gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+// Interactive frame (also the single-tier path of WebGL 1).
+function drawMain(interactive) {
+  if (!ensureProgReady()) return false;
+  const W = canvas.width, H = canvas.height;
+  drawingInt = interactive;
+  if (interactive && ensureLowFB()) {
+    const w = Math.max(1, Math.round(W * AQ.scale)), h = Math.max(1, Math.round(H * AQ.scale));
+    sceneDraw(lowFB.fb, w, h, Q_INT);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, lowFB.fb);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  } else {
+    sceneDraw(null, W, H, interactive ? Q_INT : Q_REST);
+  }
+  drawingInt = false;
+  if (interactive) drawStats.int++; else drawStats.rest++;
+  return true;
+}
+// overlays live on their own 2D canvas; redrawn with every interactive frame
+function drawOverlays() {
+  drawAxisGizmo(rotMat, canvas.clientWidth, canvas.clientHeight, camZoom);
+  drawClipHandle(rotMat, canvas.clientWidth, canvas.clientHeight, camZoom, clipHalf());
+}
+
+// Progressive rest frame: strips of the full-resolution frame go into hiFB over several display frames
+// (first strip sized to ~8 ms from the measured per-pixel cost) while the canvas keeps showing the
+// upscaled interactive frame; one blit swaps it in, so it never tears. Interaction drops the strips.
+const REST = { active: false, y: 0, rows: 0, last: 0, strips: 0, STRIP_MS: 8, REST_COST: 2.5 };   // REST_COST: rest px vs interactive px (more steps, shadows, AO)
+function restBegin() {
+  if (!ensureProgReady() || !ensureHiFB()) return false;
+  const W = canvas.width, H = canvas.height, lo = Math.ceil(H / 16), hi = Math.ceil(H / 4);
+  REST.rows = AQ.pxCost > 0 ? Math.round(REST.STRIP_MS / (AQ.pxCost * REST.REST_COST * W)) : Math.ceil(H / 6);
+  REST.rows = Math.max(lo, Math.min(hi, REST.rows));
+  REST.active = true; REST.y = 0; REST.last = 0; REST.strips = 0;
+  return true;
+}
+// one strip; true when the frame is complete and on the canvas
+function restStep(ts) {
+  const W = canvas.width, H = canvas.height;
+  if (W !== hiFB.w || H !== hiFB.h) { REST.active = false; renderDirty = true; return false; }   // pane resized mid-way
+  if (REST.last) {   // adapt to the measured strip interval
+    const d = ts - REST.last, lo = Math.ceil(H / 16), hi = Math.ceil(H / 4);
+    if (d > Math.max(24, AQ.vsync * 1.5)) REST.rows = Math.max(lo, Math.floor(REST.rows * 0.6));
+    else if (d < Math.max(14, AQ.vsync * 1.05)) REST.rows = Math.min(hi, Math.ceil(REST.rows * 1.3));
+  }
+  REST.last = ts;
+  const y1 = Math.min(H, REST.y + REST.rows);
+  drawingInt = false;
+  sceneDraw(hiFB.fb, W, H, Q_REST, [REST.y, y1]); REST.y = y1; REST.strips++;
+  if (REST.y < H) return false;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, hiFB.fb);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  REST.active = false; drawStats.rest++; drawStats.restStrips = REST.strips;
+  return true;
+}
+function drawRestProgressiveAll() { if (!restBegin()) return; let t = 0; while (REST.active) restStep(t += 16); }   // timing / strip tests only
+
+// On-demand loop: the main view is drawn only when something changed (renderDirty) or Animate is
+// on, at interactive quality while moving, then once at rest quality when idle. The loop stops when
+// there is nothing left to do. The stiffness glyph is folded in (see wvGlyphTick).
+function frame(ts) {
+  loopOn = false;
+  if (glLost) return;
+  if (AQ.lastTick) { const d = ts - AQ.lastTick; if (d > 4 && d < AQ.vsync) AQ.vsync = d; } AQ.lastTick = ts;   // display frame interval
+  if (resize()) { renderDirty = true; REST.active = false; AQ.prev = 0; }
+  if (State.animate) { if (animStep(ts)) renderDirty = true; } else animLast = 0;
+  const now = performance.now();
+  const moving = State.animate || drag || scrub || (now - lastInteract < IDLE_MS) || !!(f13View && f13View.interacting);
+  let drewInt = false;
+  if (renderDirty) {                    // any change: a quick frame now, refine when idle
+    renderDirty = false; REST.active = false;
+    if (drawMain(true)) { drawOverlays(); refinePending = true; drewInt = true; }
+    else renderDirty = true;            // shader still linking: try again next frame
+  } else if (refinePending && moving) {
+    REST.active = false;                // interaction resumed: drop the strips
+  } else if (refinePending) {
+    if (!REST.active && !restBegin()) { if (drawMain(false)) refinePending = false; }   // WebGL 1: one direct frame
+    else if (restStep(ts)) { refinePending = false; AQ.cap = Math.min(AQ.max, AQ.cap + 0.05); }   // let the next interaction probe a little higher
+  }
+  if (drewInt) aqSample(ts); else AQ.prev = 0;
+  const spin = wvGlyphTick(ts, moving);
+  if (State.animate || renderDirty || refinePending || moving || spin) { loopOn = true; requestAnimationFrame(frame); }
+}
+
+// WebGL context loss: stop, then rebuild everything on restore and redraw.
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); glLost = true; REST.active = false; });
+canvas.addEventListener('webglcontextrestored', () => {
+  glLost = false;
+  lowFB.fb = lowFB.rb = null; lowFB.w = lowFB.h = 0;
+  hiFB.fb = hiFB.rb = null; hiFB.w = hiFB.h = 0;
+  glInit();
+  renderDirty = true; refinePending = true; wakeLoop();
+});
+
+function setSceneUniforms(W, H, steps) {
+  gl.uniform2f(U.resolution, W, H);
   gl.uniformMatrix3fv(U.rot, false, new Float32Array(rotMat));
   gl.uniform1f(U.zoom, camZoom);
   if (U.clipAxis) gl.uniform1f(U.clipAxis, clipState.axis);
@@ -1657,7 +1837,7 @@ function render() {
   gl.uniform1f(U.time, State.time);
   gl.uniform1i(U.symmetry, State.symmetry);
   gl.uniform1f(U.tile, State.tile);
-  gl.uniform1i(U.steps, State.quality);
+  gl.uniform1i(U.steps, steps);
   gl.uniform1f(U.signFlip, State.signFlip);
   gl.uniform1f(U.sheetMode, State.sheetMode);
   gl.uniform1f(U.thickness, State.thickness);
@@ -1682,10 +1862,6 @@ function render() {
   }
 
   if (f13View) f13View.apply(gl, prog);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-  drawAxisGizmo(rotMat, canvas.clientWidth, canvas.clientHeight, camZoom);
-  drawClipHandle(rotMat, canvas.clientWidth, canvas.clientHeight, camZoom, clipHalf());
 }
 
 // ============================================================
@@ -2216,7 +2392,22 @@ function wvInitGlyphGL() {
   if (!wvGL) { cv.style.display = 'none'; var nt = $('wv-glyph-note'); if (nt) nt.style.display = 'block'; return false; }
   if (!wvQuad) { wvQuad = wvGL.createBuffer(); wvGL.bindBuffer(wvGL.ARRAY_BUFFER, wvQuad); wvGL.bufferData(wvGL.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), wvGL.STATIC_DRAW); }
   wvRot = wvMat3Mul(wvRotAxis(0, 1, 0, 0.6), wvRotAxis(1, 0, 0, -0.3));
-  wvGLReady = true; return true;
+  wvGLReady = true;
+  if (!wvGlyphObs) {
+    // context loss: rebuild the program from the last moduli and redraw
+    cv.addEventListener('webglcontextlost', function (e) { e.preventDefault(); wvLost = true; });
+    cv.addEventListener('webglcontextrestored', function () {
+      wvLost = false; wvQuad = null; wvProg = null; wvURes = null;
+      wvQuad = wvGL.createBuffer(); wvGL.bindBuffer(wvGL.ARRAY_BUFFER, wvQuad); wvGL.bufferData(wvGL.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), wvGL.STATIC_DRAW);
+      if (wvLast) wvRebuildGlyph.apply(null, wvLast);
+    });
+    // on screen = the Analyze section is showing (a hidden section has no box)
+    if (window.IntersectionObserver) {
+      wvGlyphObs = new IntersectionObserver(function (en) { glyphOnScreen = en[en.length - 1].isIntersecting; if (glyphOnScreen) glyphRedraw(); });
+      wvGlyphObs.observe(cv);
+    } else { wvGlyphObs = true; glyphOnScreen = true; }
+  }
+  return true;
 }
 function wvCompile(type, src) { var sh = wvGL.createShader(type); wvGL.shaderSource(sh, src); wvGL.compileShader(sh); if (!wvGL.getShaderParameter(sh, wvGL.COMPILE_STATUS)) console.error('F13LD.wave glyph shader:', wvGL.getShaderInfoLog(sh)); return sh; }
 function wvRebuildGlyph(Ex, Ey, Ez, Gxy, nu) {
@@ -2236,19 +2427,36 @@ function wvRebuildGlyph(Ex, Ey, Ez, Gxy, nu) {
   wvURes = wvGL.getUniformLocation(wvProg, 'res');
   wvURot = wvGL.getUniformLocation(wvProg, 'rot');
   wvUZoom = wvGL.getUniformLocation(wvProg, 'zoom');
+  wvLast = [Ex, Ey, Ez, Gxy, nu];
+  glyphRedraw();
 }
-function wvDrawGlyph() {
-  if (!wvProg || !wvURes) return;
+// Stiffness glyph: drawn on change; spun at <= 30 fps while it is on screen, results are showing and
+// the main view is still; paused while the main view moves and under Reduce Motion. Driven by frame().
+var wvGlyphObs = null, wvLost = false, wvLast = null;
+var glyphOnScreen = false, glyphDirty = false, glyphLast = 0;
+var GLYPH_SPIN = 0.24;   // rad/s (was 0.004 rad per 60 Hz frame)
+function glyphRedraw() { glyphDirty = true; wakeLoop(); }
+function wvGlyphTick(ts, moving) {
+  var live = homogResultsVisible && glyphOnScreen && !!wvProg && !wvLost;
+  var spin = live && !moving && !REDUCE_MOTION.matches;
+  if (live && glyphDirty) { wvDrawGlyph(0); glyphDirty = false; glyphLast = spin ? ts : 0; }
+  else if (spin) {
+    if (!glyphLast) glyphLast = ts;
+    else if (ts - glyphLast >= 33) { wvDrawGlyph(Math.min((ts - glyphLast) / 1000, 0.1) * GLYPH_SPIN); glyphLast = ts; }
+  } else glyphLast = 0;
+  return spin;
+}
+function wvDrawGlyph(dAng) {
+  if (!wvProg || !wvURes || wvLost) return;
   var cv = $('wv-glyph'); if (!cv) return;
-  wvRot = wvMat3Mul(wvRotAxis(0, 1, 0, 0.004), wvRot);
-  wvRot = wvOrtho(wvRot);
+  drawStats.glyph++;
+  if (dAng) { wvRot = wvMat3Mul(wvRotAxis(0, 1, 0, dAng), wvRot); wvRot = wvOrtho(wvRot); }
   wvGL.viewport(0, 0, cv.width, cv.height);
   wvGL.uniform2f(wvURes, cv.width, cv.height);
   wvGL.uniformMatrix3fv(wvURot, false, new Float32Array(wvRot));
   wvGL.uniform1f(wvUZoom, wvZoom);
   wvGL.drawArrays(wvGL.TRIANGLE_STRIP, 0, 4);
 }
-function wvGlyphLoop() { if (homogResultsVisible) wvDrawGlyph(); requestAnimationFrame(wvGlyphLoop); }
 
 // ---- Bell curves: E_i probability spread (method ~18% + grid 8/N) ----
 function wvRenderBells(axes, vals, N) {
@@ -2345,7 +2553,6 @@ $('wv-run').addEventListener('click', function () {
     }, 10);
   }, 10);
 });
-wvGlyphLoop();
 
 // ============================================================
 //   Export
@@ -2458,7 +2665,7 @@ function openInLab(){
 // ============================================================
 applyPreset('schwarzp');
 resize();
-f13View = f13ViewInit({ tool: 'wave', host: $('cw'), canvas: canvas, css: 'top:12px;left:auto;right:12px', redraw: requestRender });
+f13View = f13ViewInit({ tool: 'wave', host: $('cw'), canvas: canvas, css: 'top:12px;left:auto;right:12px', redraw: viewRedraw, moving: function () { return drawingInt; } });
 requestRender();
 
 // ============================================================
@@ -5721,10 +5928,6 @@ html.f13w .f13v-p .f13v-r::after{content:'';position:absolute;left:-6px;right:-6
 /* ── F13LD.wave ── */
 /* the stage 2 fallback tabs (id selectors beat the template's .sb-fallback rule) give way to the liquid rail and tab bar */
 html.f13w #sectionsRail .sb-fallback,html.f13w #sectionsBar .sb-fallback{display:none}
-/* Quality stays a native slider until stage 4: undo the "hide every child of a slider row" rule for it */
-html.f13w #grp-quality.sc-group.sl{display:grid;margin:2px 0 4px}
-html.f13w #grp-quality.sc-group.sl>label{display:inline-flex}
-html.f13w #grp-quality.sc-group.sl>.sv,html.f13w #grp-quality.sc-group.sl>input{display:block}
 /* rows with a label and a widget: the widget takes the rest of the row */
 html.f13w .row>.f13w-seg,html.f13w .row>.f13w-dd{flex:1 1 0;min-width:0}
 html.f13w #grp-run>#w-run{flex:1 1 0;width:auto;min-width:0}
@@ -5758,7 +5961,7 @@ html.f13w #w-play{width:max-content;max-width:100%}
     sections:[{id:'modes',label:'Modes',icon:'surface'},{id:'field',label:'Field',icon:'volume'},
               {id:'cell',label:'Cell',icon:'cell'},{id:'analyze',label:'Analyze',icon:'analyze'}],
     analyzeSection:'analyze',          // gets the results badge (F13UI.onAnalyze); null if none
-    // sliders: rows .sc-group.sl[data-w-slider="<native range id>"]. Quality stays native until stage 4.
+    // sliders: rows .sc-group.sl[data-w-slider="<native range id>"].
     sliders:{
       thickness:{format:v=>v.toFixed(2)},
       iso:{format:v=>v.toFixed(2),detents:[0]},                       // the detent replaces "Reset iso"
@@ -6239,11 +6442,7 @@ html.f13w #w-play{width:max-content;max-width:100%}
       { id:'tiling', label:'tiling \u00b7 1\u00d7 / 2\u00d7 / 3\u00d7',
         what:'Repeats the unit cell for display only.',
         see:'A field of cells instead of one \u2014 easier to read periodicity and connectivity.',
-        why:'Confirms the structure tiles seamlessly before you hand it to F13LD.mesh.' },
-      { id:'quality', label:'quality', range:'48 \u2013 192', rowAnchor:'#quality',
-        what:'Raymarch sampling resolution of the live preview.',
-        see:'Higher = crisper surface, smoother edges, slower; lower = faster, blockier.',
-        why:'Preview fidelity only \u2014 it does not change the geometry or what gets exported.' }
+        why:'Confirms the structure tiles seamlessly before you hand it to F13LD.mesh.' }
     ]},
     { title:'Homogenization \u00b7 MIL-HS', groupAnchor:'#wv-run', items:[
       { id:'hgrid', label:'grid', range:'32\u00b3 / 48\u00b3 / 64\u00b3', rowAnchor:'#wv-grid',
@@ -6329,7 +6528,7 @@ html.f13w #w-play{width:max-content;max-width:100%}
   /* "show" on a card: close the drawer, switch to the control's section, scroll to it and flash it */
   var SHOW = { preset:'#preset', symmetry:'#sym-toggle', phase:'#sign-toggle', mode:'#mode-toggle', thickness:'#thickness',
     iso:'#iso', cellScale:'#cellScale', stretchX:'#stretchX', time:'#time', modebank:'#modes-list', tiling:'#tile-toggle',
-    quality:'#quality', hgrid:'#wv-grid', hEs:'#wv-Es', hnu:'#wv-nu', hrun:'#wv-run' };
+    hgrid:'#wv-grid', hEs:'#wv-Es', hnu:'#wv-nu', hrun:'#wv-run' };
   var SHOW_ICON = '<svg class="ic sm" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2.4M8 11.8v2.4M1.8 8h2.4M11.8 8h2.4"/></svg>';
   function addShowButtons(){
     Object.keys(SHOW).forEach(function(id){
