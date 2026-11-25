@@ -149,7 +149,12 @@ sub{font-size:11px;line-height:0}
 #cw .f13v-p label{font-size:13px;color:var(--ink);min-height:44px}
 #cw .f13v-p input{width:16px;height:16px;accent-color:var(--accent)}
 #cw .f13v-p .f13v-r{font:400 13px var(--lq-font);color:var(--ink-dim);border:1px solid var(--hair-strong);border-radius:8px;padding:0 12px;min-height:44px}
-#cw .f13v>button .ic{margin-right:0}
+/* the shared view-menu block writes a "◐ view" glyph label; show a drawn icon and "View" instead */
+#cw .f13v>button{font-size:0}
+#cw .f13v>button::before{content:'';width:16px;height:16px;flex:0 0 auto;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E") center/16px 16px no-repeat}
+#cw .f13v>button::after{content:'View';font:500 13px var(--lq-font)}
 /* indicator pills (VF, SSA, SOLO) over the viewer */
 #indicators{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:6px;pointer-events:none;z-index:10}
 .wave-pill{display:flex;align-items:center;gap:6px;background:oklch(0.13 0.012 265 / 0.82);padding:5px 10px;border-radius:8px;font-size:11px;border:1px solid var(--hair);white-space:nowrap;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
@@ -230,7 +235,7 @@ body .f13h-close{width:44px;height:44px}
   #sectionsRail{display:none}
   #sheetHandle{display:flex;flex:0 0 22px;align-items:center;justify-content:center;position:relative;touch-action:none;cursor:grab;background:none;border:0;width:100%}
   #sheetHandle::before{content:'';width:36px;height:4px;border-radius:2px;background:var(--hair-strong)}
-  #sheetHandle::after{content:'';position:absolute;left:0;right:0;top:-12px;bottom:-10px}
+  #sheetHandle::after{content:'';position:absolute;left:0;right:0;top:-22px;bottom:0}   /* 44 px hit area: the 22 px bar plus 22 px above it (below it the sheet's content would cover any extension) */
   #ctrlScroll{flex:1 1 auto;padding:0 16px}
   .sec{padding:6px 0 20px}
   #sectionsBar{display:block;flex:0 0 auto;border-top:1px solid var(--hair);padding-bottom:env(safe-area-inset-bottom);background:var(--panel)}
@@ -249,7 +254,7 @@ body .f13h-close{width:44px;height:44px}
 
 /* ── F13LD.wave ── */
 /* mode bank: one grid for the header and every row, so n m p A φ sit over their columns */
-.mode-header,.mode-row{display:grid;grid-template-columns:44px repeat(5,minmax(0,1fr)) 44px;gap:2px;align-items:center}
+.mode-header,.mode-row{display:grid;grid-template-columns:44px repeat(5,minmax(44px,1fr)) 44px;gap:2px;align-items:center}
 .mode-header{font:500 11px/1 var(--lq-mono);color:var(--ink-faint);text-align:center;margin-bottom:2px}
 #modes-list{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
 .mode-row{transition:opacity .15s var(--ease)}
@@ -1450,7 +1455,7 @@ const IS_WEBGL2 = (typeof WebGL2RenderingContext !== 'undefined') && (gl instanc
 if (!gl) {
   // shared header message once the header script has loaded (alert() only if it never does)
   window.addEventListener('load', function () {
-    var t = 'WebGL not available. F13LD.wave requires a WebGL-capable browser.';
+    var t = 'WebGL is unavailable, so the viewer is off. Controls and exports still work.';
     if (window.F13UI && F13UI.message) F13UI.message(t, { ms: 60000 }); else alert(t);
   });
 }
@@ -1559,6 +1564,7 @@ function glBuildUniforms() { U = {
   p5: gl.getUniformLocation(prog, 'u_p5'),
 }; }
 function glInit() {
+  if (!gl) return;   // no WebGL: skip the viewer setup so the layout and native controls still boot
   KHR_PSC = gl.getExtension('KHR_parallel_shader_compile');
   glBuildProgram();
   glBuildBuffers();
@@ -1671,10 +1677,10 @@ canvas.addEventListener('touchcancel', () => { drag = false; scrub = false; last
 // is drawn with Q_REST (the old top quality) at full canvas resolution, in strips over several
 // frames, and blitted once. Rendering is on demand: the loop sleeps until something changes.
 // WebGL 1 has no blitFramebuffer, so it stays single tier (direct draws).
-const Q_INT = { steps: 160 }, Q_REST = { steps: 192 };
+const Q_INT = { steps: 96 }, Q_REST = { steps: 192 };
 const IDLE_MS = 150;
 const AQ = { scale: 0.7, min: 0.4, max: 0.85, cap: 0.85, ema: 0, prev: 0, vsync: 16.7, lastTick: 0, pxCost: 0 };
-let renderDirty = true, refinePending = false, lastInteract = 0, lastTs = 0, loopOn = false, drawingInt = false, glLost = false;
+let renderDirty = true, refinePending = false, lastInteract = 0, lastTs = 0, loopOn = false, drawingInt = false, glLost = !gl;   // no WebGL: the viewer stays dark, everything else works
 const REDUCE_MOTION = window.matchMedia('(prefers-reduced-motion:reduce)');
 function wakeLoop() { if (!loopOn && !glLost) { loopOn = true; lastTs = 0; requestAnimationFrame(frame); } }
 // any change to what the main view shows: a quick frame now, a refined one when idle
@@ -2130,8 +2136,10 @@ startMetricsWorker();
 // All existing call sites throughout the app call computeVF() on
 // every state change. This routes to worker if available, else
 // double-RAF deferred inline. Same payload either way.
+var vfSeq = 0, homogSeq = 0;   // design-change counter; the counter value Run's solve started from
 function computeVF() {
   if (vfDebounce) clearTimeout(vfDebounce);
+  var mySeq = ++vfSeq;
   vfDebounce = setTimeout(function() {
     var effective = getEffectiveModes();
     if (effective.length === 0) {
@@ -2154,7 +2162,8 @@ function computeVF() {
       signFlip: State.signFlip ? 1 : 0
     };
     lastPayload = payload;
-    invalidateHomog();
+    // a change made before Run's solve started is already in its results: only later changes make them stale
+    if (mySeq > homogSeq) invalidateHomog();
     showPillsComputing();
     if (workerAvailable && metricsWorker) {
       try {
@@ -2523,6 +2532,7 @@ $('wv-run').addEventListener('click', function () {
     var N = parseInt($('wv-grid').value, 10) || 48;
     var Es = parseFloat($('wv-Es').value); if (!(Es > 0)) Es = 100;
     var nu = parseFloat($('wv-nu').value); if (!(nu >= 0 && nu < 0.5)) nu = 0.3;
+    homogSeq = vfSeq;
     var res = runWaveHomog(N, Es, nu);
     if (res.degenerate) {
       $('wv-homog-status').textContent = 'Degenerate field -- no resolvable solid phase at this iso.';
@@ -2690,6 +2700,8 @@ requestRender();
   function setActive(id){
     if(!SECS.includes(id)||id===UI.active)return;
     UI.active=id;
+    // open dropdown / Recipe overlays are fixed-position and would outlive the section they were opened from
+    try{window.dispatchEvent(new Event('f13ui-section'));}catch(e){}
     document.querySelectorAll('.sb-fallback [data-section]').forEach(b=>b.classList.toggle('on',b.dataset.section===id));
     if(UI.onSectionChange)try{UI.onSectionChange(id);}catch(e){console.error(e);}
   }
@@ -2772,7 +2784,7 @@ requestRender();
 
 <!-- liquid-ui kit: dist/liquid-ui.js from liquid-ui branch f13ld-wave1-kit (692f6a2), verbatim. Never edit here. -->
 <script id="liquid-ui">
-/* liquid-ui (mshomper/liquid-ui @ f79aeaf) — core + widgets bundle. Do not edit here; edit the kit and rebuild. */
+/* liquid-ui (mshomper/liquid-ui @ 3c6f581) — core + widgets bundle. Do not edit here; edit the kit and rebuild. */
 /* ============================================================================
    Liquid UI core — SDF-shaded "liquid" controls for the web.
    One shared WebGL context renders every component into its own 2D canvas.
@@ -3466,9 +3478,24 @@ float accentSDF(vec2 p){
     function attachWin() { window.addEventListener('scroll', onScroll, true); window.addEventListener('resize', onResizeWin); }
     function detachWin() { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onResizeWin); }
 
+    // Close bookkeeping: a failsafe timer completes the close if the animator is starved (busy machine), and
+    // Esc / a section change (window event 'f13ui-section') dismiss even when focus is not in the widget.
+    let closeTimer = 0;
+    function finishClose() {   // snap shut: overlay hidden, springs at rest
+      clearTimeout(closeTimer); closeTimer = 0;
+      if (open || !active) return;
+      [desc, ph, pw, press, head, tail, vis].forEach(s => s.snap()); tail.set(head.x);
+      pending = null; closeAt = -1;
+      active = false; ov.style.display = 'none'; detachWin(); write();
+    }
+    const onEsc = e => { if (e.key === 'Escape' && open) setOpen(false); };
+    const onSection = () => { if (open || active) { setOpen(false); finishClose(); } };
+    document.addEventListener('keydown', onEsc, true);
+    window.addEventListener('f13ui-section', onSection);
     function setOpen(v, focusSel) {
       closeAt = -1;
       if (v === open || (v && disabled)) return;
+      clearTimeout(closeTimer); closeTimer = 0;
       open = v;
       btn.setAttribute('aria-expanded', v);
       host.classList.toggle('lq-wd-open', v); ov.classList.toggle('lq-wd-open', v);
@@ -3500,6 +3527,7 @@ float accentSDF(vec2 p){
         desc.target = 0; ph.target = 0; pw.target = W0;
         if (!Liquid.state.reduce) press.v -= 1.2;
         if (ov.contains(document.activeElement)) btn.focus({ preventScroll: true });
+        closeTimer = setTimeout(finishClose, 480);
       }
       anim.wake();
     }
@@ -3586,10 +3614,11 @@ float accentSDF(vec2 p){
         paintFace(); anim.wake();
       },
       setDisabled(b) { disabled = !!b; btn.disabled = disabled; if (disabled && open) setOpen(false); },
-      open() { setOpen(true); }, close() { setOpen(false); },
+      open() { setOpen(true); }, close(immediate) { setOpen(false); if (immediate) finishClose(); },
       redraw: write,
       destroy() {
-        destroyed = true; detachWin(); document.removeEventListener('pointerdown', outside, true);
+        destroyed = true; detachWin(); clearTimeout(closeTimer);
+        document.removeEventListener('keydown', onEsc, true); window.removeEventListener('f13ui-section', onSection); document.removeEventListener('pointerdown', outside, true);
         for (const s of [hs, os]) if (s) { s.ro.disconnect(); s.draw = () => {}; }
         ov.remove(); host.innerHTML = ''; host.classList.remove('lq-wd', 'lq-wd-open');
       }
@@ -5092,6 +5121,13 @@ float bodySDF(vec2 p){
     });
     const outside = e => { if (open && !host.contains(e.target) && !ov.contains(e.target)) setOpen(false); };
     document.addEventListener('pointerdown', outside, true);
+    const onSection = () => {   // section change: dismiss at once
+      if (!open && !active) return;
+      setOpen(false); pending = [];
+      s.forEach(sp => { sp.target = 0; sp.snap(); }); sc.snap();
+      active = false; ov.style.display = 'none'; detachWin(); write();
+    };
+    window.addEventListener('f13ui-section', onSection);
 
     return {
       get: () => open,
@@ -5103,9 +5139,25 @@ float bodySDF(vec2 p){
         if ('label' in st) { items[i].label = st.label; kids[i].querySelector('.lq-wsd-lab').textContent = st.label; if (active) layoutOverlay(); }
         write();
       },
-      // replace the targets in place (no destroy/recreate); an open menu closes at once
+      // replace the targets in place (no destroy/recreate). An open menu stays open and rebuilds with the new
+      // items (settled, no re-bud); one that is still closing finishes closing at once.
       setItems(list) {
-        if (open || active) {
+        if (open) {
+          const fi = kids.indexOf(document.activeElement);
+          if (os) { os.destroy(); os = null; }   // the overlay shader is sized by item count
+          buildItems(list);
+          s.forEach(sp => sp.set(1));
+          pending = [];
+          layoutOverlay();
+          if (items.length) {
+            os = new Liquid.Surface(ov, { glsl: ovGlsl(N), bleed: 32, onResize() { write(); } });
+            os.setAccent(A);
+          } else setOpen(false);
+          if (fi >= 0 && kids.length) kids[Math.min(fi, kids.length - 1)].focus({ preventScroll: true });
+          write(); anim.wake();
+          return;
+        }
+        if (active) {
           const refocus = ov.contains(document.activeElement);
           open = false; active = false; pending = [];
           main.setAttribute('aria-expanded', 'false');
@@ -5121,6 +5173,7 @@ float bodySDF(vec2 p){
       redraw: write,
       destroy() {
         destroyed = true; detachWin(); document.removeEventListener('pointerdown', outside, true);
+        window.removeEventListener('f13ui-section', onSection);
         for (const x of [hs, os]) if (x) x.destroy();
         ov.remove(); host.innerHTML = ''; host.classList.remove('lq-wsd', 'lq-wsd-open'); host.style.width = '';
       }
@@ -5911,6 +5964,11 @@ html.f13w .sl>.row-extra{margin-top:2px}
 .f13w-lab{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:6px}
 .f13w-lab>label{font-size:13px;font-weight:550;line-height:18px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .lq-sl-head .f13h-i{pointer-events:auto;flex:none;z-index:3}   /* z: its 44px hit box sits above the track's hit box */
+/* the help engine may append the (i) inside the <label>: a clipping label would cut its 44x44 ::after to the label box
+   (31x20 measured). overflow:clip keeps the ellipsis, and overflow-clip-margin lets the hit box reach past the label */
+.f13w-lab>label{overflow:clip;overflow-clip-margin:16px}
+.f13w-lab .f13h-i{position:relative;flex:none}
+.f13w-lab .f13h-i::after{content:'';position:absolute;inset:-14px}   /* 18 + 28 = 46 square, above the track's own hit box (z-index on the (i)) */
 /* fraction labels (⅛ ¼ …): mono faces lack the glyphs, so use the UI face for those sliders */
 .f13w-frac .lq-sl-num{font-family:var(--lq-font);font-size:15px}
 
@@ -5946,7 +6004,7 @@ html.f13w #sectionsBar{border-top:none;padding:0 8px env(safe-area-inset-bottom)
 .f13w-tg-menu{width:100%}
 html.f13w .f13v-p{padding:2px 10px 6px 12px;min-width:184px;gap:0}
 html.f13w .f13v-p .f13v-r{margin-top:4px;min-height:28px;padding:0 10px;position:relative}
-html.f13w .f13v-p .f13v-r::after{content:'';position:absolute;left:-6px;right:-6px;top:-8px;bottom:-8px}
+html.f13w .f13v-p .f13v-r::after{content:'';position:absolute;left:-6px;right:-6px;top:-8px;bottom:-12px}   /* 31 px face + 20 = 51 px hit height; the extra reach is below, where only panel padding is, so the toggle above keeps its hit area */
 
 /* ── F13LD.wave ── */
 /* rows with a label and a widget: the widget takes the rest of the row */
@@ -6009,7 +6067,9 @@ html.f13w #w-play{width:max-content;max-width:100%}
         options:[1,2,3].map(n=>({value:String(n),label:n+'×'+n+'×'+n,btn:'tile-b'+n}))}
     ],
     // native <select>s → liquid dropdowns (grid is a segmented, see PER-TOOL EXTRAS)
-    selects:[{sel:'preset',id:'w-preset',ariaLabel:'Preset'}],
+    // the panel is at most 212 px wide (kit): two names are shortened so they read in full (the native <select> keeps the long ones)
+    selects:[{sel:'preset',id:'w-preset',ariaLabel:'Preset',relabel:{
+      chiral321:{label:'Chiral Asym. (3,2,1)'},chladni211:{label:'Aniso. Chladni (2,1,0)'}}}],
     // native switch buttons: none (Animate is aria-pressed, see PER-TOOL EXTRAS)
     switches:[],
     viewMenu:true,                     // shared F13LD-VIEW menu checkboxes → toggles
@@ -6019,8 +6079,8 @@ html.f13w #w-play{width:max-content;max-width:100%}
       set:n=>{ if(!n){ if(clipState.axis)onClipPill(clipState.axis); } else if(clipState.axis!==n)onClipPill(n); }},
     // Recipe menu: Open recipe… / Export JSON / Queue / Choose queue… / Mesh / Lab
     recipe:{host:'w-recipe',exportBtn:'exp-json',mesh:()=>openInMesh(),lab:()=>openInLab()},
-    // help "show" targets live in the help drop-in (SHOW)
-    helpTargets:{}
+    // help "show" targets live in the help drop-in (SHOW); only a control the mode can hide needs a note here
+    helpTargets:{thickness:{sel:'#thickness',note:'Thickness applies in Sheet mode only.'}}
   };
   /* ============ END PER-TOOL CONFIG ==================================== */
 
@@ -6286,34 +6346,58 @@ html.f13w #w-play{width:max-content;max-width:100%}
   /* ============ END PER-TOOL EXTRAS ==================================== */
 
   // ---- help: each drawer card whose control lives in a section gets a "show" button ----
-  UI.revealControl=function(sel){
-    const el=typeof sel==='string'?document.querySelector(sel):sel;if(!el)return false;
+  // Targets: CONFIG.helpTargets and a tool's own F13UI.helpTargets (read at call time, wins): id → selector,
+  // "a, b" (first drawn candidate), or {sel, note}. `note` is what a hidden control says ("Helicoid only").
+  // revealControl(sel, id) COMPOSES with a revealControl a tool defined earlier: visible controls land on their
+  // row / widget here; a control hidden by the current mode (its row not drawn) goes to the earlier function
+  // (its own message path), else says its note (default text below). It never flashes a whole section.
+  const prevReveal=typeof UI.revealControl==='function'&&!UI.revealControl.f13wire?UI.revealControl:null;
+  const targets=()=>Object.assign({},CONFIG.helpTargets,UI.helpTargets);
+  const vis=n=>!!(n&&n.getClientRects().length);
+  function resolveEl(sel){
+    if(sel&&typeof sel==='object'&&!sel.nodeType)sel=sel.sel;
+    if(typeof sel!=='string')return sel||null;
+    const cs=sel.split(',').map(s=>document.querySelector(s.trim())).filter(Boolean);
+    return cs.find(vis)||cs[0]||null;
+  }
+  UI.revealControl=function(sel,id){
+    const spec=sel==null&&id!=null?targets()[id]:sel;
+    const el=resolveEl(spec);if(!el)return false;
     const sec=UI.sectionOf(el);if(sec)UI.showSection(sec);
     if(UI.isPhone()&&UI.setSheet)UI.setSheet('full');
-    // natives are hidden ([data-native]): land on the visible row, else the widget mounted beside the native, else the nearest visible ancestor
-    const vis=n=>!!(n&&n.getClientRects().length);
+    // natives are hidden ([data-native]): land on the visible row, else the widget mounted beside the native,
+    // else (the native alone is hidden) its parent. A row hidden by the current mode lands nowhere.
     let row=el.closest('.sc-group')||el;
     if(!vis(row)){
-      const sib=[el.nextElementSibling,el.previousElementSibling].find(n=>n&&/(^|\s)f13w-/.test(n.className)&&vis(n));
-      row=sib||(()=>{let n=el.parentElement;while(n&&!vis(n))n=n.parentElement;return n&&n!==document.body&&n!==document.documentElement?n:null;})();
+      let top=el;while(top.parentElement&&!vis(top.parentElement))top=top.parentElement;
+      const sib=top===el&&[el.nextElementSibling,el.previousElementSibling].find(n=>n&&/(^|\s)f13w-/.test(n.className)&&vis(n));
+      const par=top===el?el.parentElement:null;
+      row=sib||(par&&!par.matches('.sec,#ctrlScroll,#ctrlPane,#main,body,html')?par:null);
     }
-    if(!row)return false;
+    if(!row){
+      if(prevReveal){try{return prevReveal.call(UI,(spec&&spec.sel)||spec,id);}catch(e){console.error(e);}}
+      const t=id!=null?targets()[id]:null,note=(t&&typeof t==='object'&&t.note)||(sel&&typeof sel==='object'&&sel.note);
+      say(note||'This control is hidden in the current mode.');
+      return false;
+    }
     row.scrollIntoView({block:'center',behavior:Liquid.state.reduce?'auto':'smooth'});
     row.classList.remove('f13w-flash');void row.offsetWidth;row.classList.add('f13w-flash');
     setTimeout(()=>row.classList.remove('f13w-flash'),1400);
     return true;
   };
+  UI.revealControl.f13wire=true;
   const SHOW_ICON='<svg class="ic sm" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2.4M8 11.8v2.4M1.8 8h2.4M11.8 8h2.4"/></svg>';
   function addShowButtons(){
-    Object.keys(CONFIG.helpTargets).forEach(id=>{
+    Object.keys(targets()).forEach(id=>{
       const h=document.querySelector('#f13h-card-'+id+' .f13h-card-h');if(!h||h.querySelector('.f13w-show'))return;
       const b=document.createElement('button');b.type='button';b.className='f13w-show';b.innerHTML=SHOW_ICON+'<span>show</span>';
       b.setAttribute('aria-label','Show this control');
-      b.addEventListener('click',e=>{e.stopPropagation();const s=document.querySelector('.f13h-scrim.open');if(s)s.click();UI.revealControl(CONFIG.helpTargets[id]);});
+      b.addEventListener('click',e=>{e.stopPropagation();const s=document.querySelector('.f13h-scrim.open');if(s)s.click();UI.revealControl(targets()[id],id);});
       h.appendChild(b);
     });
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(addShowButtons,0));else setTimeout(addShowButtons,0);
+  window.addEventListener('load',addShowButtons);                    // a tool setting F13UI.helpTargets / the help block later
 })();
 </script>
 
@@ -6783,7 +6867,7 @@ html.f13w #w-play{width:max-content;max-width:100%}
       b.addEventListener('click', function(e){
         e.stopPropagation();
         closeDrawer();
-        if(window.F13UI && F13UI.revealControl) F13UI.revealControl(SHOW[id]);
+        if(window.F13UI && F13UI.revealControl) F13UI.revealControl(SHOW[id], id);
       });
       h.appendChild(b);
     });
