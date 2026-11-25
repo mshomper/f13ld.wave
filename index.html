@@ -603,7 +603,7 @@ body .f13h-close{width:44px;height:44px}
 
         <div class="group">
           <div class="group-title" id="gt-export">Export</div>
-          <button id="exp-json" class="btn wide" type="button"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.8 6.8L8 10l3.2-3.2M2.5 12.5h11"/></svg><span>Save JSON</span></button>
+          <button id="exp-json" class="btn wide" type="button"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.8 6.8L8 10l3.2-3.2M2.5 12.5h11"/></svg><span>Export JSON</span></button>
           <div class="hint">Recipe JSON for F13LD.mesh and F13LD.lab. The Mesh and Lab buttons in the header send it directly.</div>
         </div>
       </section>
@@ -1448,7 +1448,11 @@ const gl =
   canvas.getContext('webgl',  _glOpts);
 const IS_WEBGL2 = (typeof WebGL2RenderingContext !== 'undefined') && (gl instanceof WebGL2RenderingContext);
 if (!gl) {
-  alert('WebGL not available. F13LD.wave requires a WebGL-capable browser.');
+  // shared header message once the header script has loaded (alert() only if it never does)
+  window.addEventListener('load', function () {
+    var t = 'WebGL not available. F13LD.wave requires a WebGL-capable browser.';
+    if (window.F13UI && F13UI.message) F13UI.message(t, { ms: 60000 }); else alert(t);
+  });
 }
 
 // Non-blocking shader-compile extension (works in WebGL 1 + 2)
@@ -5878,8 +5882,27 @@ float floodSDF(vec2 p){
 html.f13w{--rail-w:72px}
 html.f13w [data-native]{display:none!important}
 
-/* header: the template's Recipe-menu header rules are left out. Stage 5 adds them with the Recipe
-   menu; until then Export, Mesh, Lab and Queue stay as stage 2 built them. */
+/* header: the Recipe menu replaces Queue / Mesh / Lab / Export; the queue client's own buttons stay
+   mounted (invisible, no pointer) so its menus and feedback still work when a Recipe item triggers them */
+html.f13w #w-recipe{flex:none}
+html.f13w .fh-right>.f13ldq-split,html.f13w .fh-right>.f13ldq-main{position:absolute;right:14px;top:calc(env(safe-area-inset-top) + 8px);pointer-events:none;z-index:-1}
+html.f13w .fh-right>.f13ldq-split>.f13ldq-main,html.f13w .fh-right>.f13ldq-split>.f13ldq-caret,html.f13w .fh-right>.f13ldq-main{opacity:0}
+html.f13w .fh-right>.f13ldq-split>:not(.f13ldq-main):not(.f13ldq-caret){pointer-events:auto}
+html.f13w #f13ldq-fallback{display:none}
+html.f13w .fh-mesh-btn{display:none}
+html.f13w .group:has(>#exp-json){display:none}   /* Export JSON lives in the Recipe menu */
+@media (max-width:560px){
+  html.f13w .f13ld-header{flex-wrap:nowrap;padding:0 10px;padding-top:env(safe-area-inset-top);column-gap:8px}
+  html.f13w .f13ld-header::after{display:none}
+  html.f13w .fh-left{gap:8px;flex:none}
+  html.f13w .fh-right{display:flex;gap:6px}
+}
+@media (max-width:380px){
+  html.f13w .f13ld-header{column-gap:4px;padding-left:8px;padding-right:8px}
+  html.f13w .fh-divider{display:none}
+  html.f13w .fh-left{gap:6px}
+  html.f13w .fh-right{gap:3px}
+}
 
 /* sliders: the widget carries label · value · hint · track; the row keeps only .row-extra.
    Hit geometry: the track's hit box runs 4px below the widget, the value's 4px above it. */
@@ -5991,8 +6014,8 @@ html.f13w #w-play{width:max-content;max-width:100%}
     // clip radio over the viewer; tapping the active axis releases it
     clip:{host:'w-clip',get:()=>clipState.axis,
       set:n=>{ if(!n){ if(clipState.axis)onClipPill(clipState.axis); } else if(clipState.axis!==n)onClipPill(n); }},
-    // Recipe menu: stage 5. Export, Mesh, Lab and Queue stay as they are.
-    recipe:null,
+    // Recipe menu: Open recipe… / Export JSON / Queue / Choose queue… / Mesh / Lab
+    recipe:{host:'w-recipe',exportBtn:'exp-json',mesh:()=>openInMesh(),lab:()=>openInLab()},
     // help "show" targets live in the help drop-in (SHOW)
     helpTargets:{}
   };
@@ -6257,6 +6280,192 @@ html.f13w #w-play{width:max-content;max-width:100%}
     });
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(addShowButtons,0));else setTimeout(addShowButtons,0);
+})();
+</script>
+
+<!-- ===== F13LD UI · recipe import (Open recipe… / drop / paste, Undo) ===== -->
+<style id="f13-recipe-style">
+.f13r-drop{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;pointer-events:none;opacity:0;visibility:hidden;
+  background:oklch(0.10 0.01 265 / 0.6);transition:opacity 160ms ease-out,visibility 0s linear 160ms}
+.f13r-drop.on{opacity:1;visibility:visible;transition:opacity 160ms ease-out}
+.f13r-drop::before{content:'';position:absolute;inset:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));border-radius:24px;
+  box-shadow:inset 0 0 0 2px var(--accent),inset 0 0 40px var(--accent-soft),0 0 0 6px var(--accent-soft)}
+.f13r-card{position:relative;display:flex;align-items:center;gap:14px;padding:14px 22px 14px 14px;border-radius:24px;background:var(--card);
+  box-shadow:inset 0 1px 0 oklch(1 0 0 / 0.06),0 2px 0 oklch(0 0 0 / 0.35),0 18px 40px oklch(0 0 0 / 0.45);
+  transform:translateY(8px) scale(.96);transition:transform 220ms cubic-bezier(.3,1.4,.5,1)}
+.f13r-drop.on .f13r-card{transform:none}
+.f13r-drop-ic{flex:none;display:grid;place-items:center;width:48px;height:48px;border-radius:50%;color:var(--accent-ink);
+  background:radial-gradient(circle at 34% 28%,oklch(0.97 0.07 80) 0,var(--accent) 46%,oklch(0.70 0.15 68) 100%);
+  box-shadow:0 0 22px var(--accent-line),inset 0 -3px 6px oklch(0.5 0.12 70 / 0.35)}
+.f13r-drop-ic svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.f13r-card b{display:block;font:650 15px/20px var(--lq-font);color:var(--ink)}
+.f13r-card small{display:block;font:400 13px/18px var(--lq-font);color:var(--ink-dim)}
+@media (prefers-reduced-motion:reduce){.f13r-card{transform:none;transition:none}}
+</style>
+<script id="f13-recipe-import">
+/* F13LD UI template · recipe-import.js, filled in for F13LD.wave. The GENERIC half follows the template; one
+   addition: wave exports carry no meta block, so recognition is by structure (TOOL.check / TOOL.isCandidate). */
+(function(){
+  'use strict';
+  const $=id=>document.getElementById(id);
+
+  /* ============ PER-TOOL ============================================== */
+  const SYM=['pure','antisym','cubic','chiral','schoen'];
+  const MAXM=6,TWO_PI=Math.PI*2;
+  const num=v=>typeof v==='number'&&isFinite(v);
+  const isObj=o=>!!o&&typeof o==='object'&&!Array.isArray(o);
+  const LEGACY_TOOLS={'noise-scaffold-explorer':'F13LD.noise',grain:'F13LD.grain',beam:'F13LD.beam','beam-builder':'F13LD.beam','bundle-builder':'F13LD.bundle'};
+  const foreign=t=>LEGACY_TOOLS[String(t).toLowerCase()]||String(t).replace(/^f13ld\./i,'F13LD.');
+  // wave recipes have no meta block: schema "f13ld.wave/v*", tool "F13LD.wave", family "wave", or field.modes[]
+  function check(r){
+    if(!isObj(r))return 'Not a recipe.';
+    const mt=r.meta&&typeof r.meta==='object'?r.meta.tool:null;
+    if(typeof mt==='string'&&mt&&!/^f13ld\.wave$/i.test(mt))return 'This recipe is from '+foreign(mt)+'. Open it there.';
+    if(typeof r.tool==='string'&&r.tool&&!/^f13ld\.wave$/i.test(r.tool))return 'This recipe is from '+foreign(r.tool)+'. Open it there.';
+    if(typeof r.family==='string'&&r.family&&r.family.toLowerCase()!=='wave')return 'This recipe is from F13LD.'+r.family+'. Open it there.';
+    const sm=typeof r.schema==='string'&&r.schema.match(/^f13ld\.([a-z0-9_-]+)\//i);
+    if(sm&&sm[1].toLowerCase()!=='wave')return 'This recipe is from F13LD.'+sm[1].toLowerCase()+'. Open it there.';
+    if(sm||/^f13ld\.wave$/i.test(r.tool||'')||r.family==='wave'||(isObj(r.field)&&Array.isArray(r.field.modes)))return '';
+    if(Array.isArray(r.beams))return 'This recipe is from F13LD.beam. Open it there.';
+    if(isObj(r.surface)&&r.surface.type)return 'This recipe is from F13LD.tpms. Open it there.';
+    return 'Not an F13LD.wave recipe.';
+  }
+  const isCandidate=r=>isObj(r)&&(!!r.schema||!!r.tool||!!r.family||!!r.meta||isObj(r.field));
+  const clampNum=(v,lo,hi,def,name,warn)=>{
+    if(v===undefined||v===null){return def;}
+    if(!num(v)){warn(name+' is not a number; kept '+def+'.');return def;}
+    if(v<lo||v>hi){const c=Math.min(hi,Math.max(lo,v));warn(name+' '+v+' → '+c+' (range '+lo+' to '+(+hi.toFixed(2))+').');return c;}
+    return v;
+  };
+  function plan(r,warn){
+    const f=r.field;
+    if(!isObj(f))throw new Error('This recipe has no field block.');
+    if(!Array.isArray(f.modes))throw new Error('This recipe has no modes.');
+    let ms=f.modes;
+    if(ms.length>MAXM){warn('Only the first '+MAXM+' of '+ms.length+' modes are used.');ms=ms.slice(0,MAXM);}
+    const modes=ms.map((m,i)=>{
+      if(!isObj(m))throw new Error('Mode '+(i+1)+' is not valid.');
+      const k=i+1,iv=(key,def)=>{const v=clampNum(m[key],0,8,def,key+' (mode '+k+')',warn);
+        if(num(v)&&v!==Math.round(v)){warn(key+' (mode '+k+') '+v+' → '+Math.round(v)+' (whole numbers only).');return Math.round(v);}return v;};
+      return {n:iv('n',0),m:iv('m',0),p:iv('p',0),
+        A:clampNum(m.A,-2,2,1,'A (mode '+k+')',warn),phi:clampNum(m.phi,0,TWO_PI,0,'phi (mode '+k+')',warn)};
+    });
+    let sym=0;
+    if(num(f.symmetryId)){sym=Math.round(f.symmetryId);if(sym<0||sym>4){warn('symmetry '+f.symmetryId+' → '+Math.min(4,Math.max(0,sym)));sym=Math.min(4,Math.max(0,sym));}}
+    else if(typeof f.symmetry==='string'&&SYM.indexOf(f.symmetry)>=0)sym=SYM.indexOf(f.symmetry);
+    else if(f.symmetry!==undefined){warn('Unknown symmetry; used pure.');}
+    let flip=0;
+    if(f.signFlip!==undefined&&f.signFlip!==null)flip=f.signFlip?1:0;
+    else if(f.phase==='B')flip=1;
+    const sheet=f.mode==='sheet'?1:0;
+    if(f.mode!==undefined&&f.mode!=='sheet'&&f.mode!=='solid')warn('Unknown mode "'+f.mode+'"; used solid.');
+    let thk=null;
+    if(num(f.thickness))thk=clampNum(f.thickness,0.02,1.5,null,'thickness',warn);
+    else if(f.thickness===null||f.thickness===undefined)thk=num(r.__thk)?r.__thk:null;   // solid exports carry none: keep the current one
+    else warn('thickness is not a number; kept the current one.');
+    let st=[1,1,1];
+    if(f.stretch!==undefined&&f.stretch!==null){
+      if(Array.isArray(f.stretch))st=[0,1,2].map(i=>clampNum(f.stretch[i],0.5,2,1,'stretch '+'xyz'[i],warn));
+      else warn('stretch is not a list; used 1,1,1.');
+    }
+    const solo=num(r.__solo)&&r.__solo>=0&&r.__solo<modes.length?r.__solo:-1;
+    return {modes,sym,flip,sheet,thk,solo,
+      iso:clampNum(f.iso,-3,3,0,'iso',warn),cell:clampNum(f.cellScale,0.5,3,1,'cellScale',warn),
+      st,time:clampNum(f.phaseTime,0,6.2832,0,'phaseTime',warn)};
+  }
+  // apply: write State, then drive the app's own sync paths (mode bank rebuild, control sync, segmented classes), then one render + one metrics run
+  function apply(P){
+    State.modes=P.modes.map(m=>({...m}));
+    State.soloMode=P.solo;
+    State.symmetry=P.sym;State.signFlip=P.flip;State.sheetMode=P.sheet;
+    if(P.thk!==null)State.thickness=P.thk;
+    State.iso=P.iso;State.cellScale=P.cell;
+    State.stretchX=P.st[0];State.stretchY=P.st[1];State.stretchZ=P.st[2];State.time=P.time;
+    if($('preset'))$('preset').value='custom';                       // the menu then reads "Custom"
+    rebuildModesUI();updateSoloPill();
+    syncControls();                                                  // iso / cell / stretch / time / symmetry / phase
+    $('mode-toggle').querySelectorAll('button').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.mode)===State.sheetMode));
+    $('thickness-row').style.display=State.sheetMode?'':'none';
+    $('thickness').value=State.thickness;$('thickness-v').textContent=State.thickness.toFixed(2);
+    requestRender();computeVF();
+  }
+  const TOOL={
+    id:'f13ld.wave',name:'F13LD.wave',major:0,
+    exportRecipe(){                                                  // the snapshot also remembers what the export leaves out, so Undo is exact
+      const r=buildExportJSON();
+      Object.defineProperty(r,'__thk',{value:State.thickness,enumerable:false});
+      Object.defineProperty(r,'__solo',{value:State.soloMode,enumerable:false});
+      return r;
+    },
+    check,isCandidate,
+    plan,apply,
+    label:()=>'wave · '+State.modes.length+(State.modes.length===1?' mode · ':' modes · ')+SYM[State.symmetry]+(State.sheetMode?' · sheet':'')
+  };
+  /* ============ END PER-TOOL =========================================== */
+
+  /* ============ GENERIC ================================================ */
+  const say=(t,o)=>setTimeout(()=>{if(window.F13UI&&F13UI.message)F13UI.message(t,o);},0);
+  // → {ok, warnings, error?, label?, before?}. Unknown keys are ignored; nothing changes unless ok.
+  function applyRecipe(r){
+    const warnings=[],warn=m=>{if(warnings.indexOf(m)<0)warnings.push(m);};
+    const err=TOOL.check(r);if(err)return {ok:false,error:err,warnings};
+    const v=String((r&&r.version)||(r.meta&&r.meta.version)||'0.1');
+    if(parseInt(v,10)>TOOL.major)warn('Made by a newer '+TOOL.name+' ('+v+'); parts it does not know were skipped.');
+    let P;try{P=TOOL.plan(r,warn);}catch(e){return {ok:false,error:e.message,warnings};}
+    const before=TOOL.exportRecipe();
+    try{TOOL.apply(P,warn);}
+    catch(e){console.error(e);try{TOOL.apply(TOOL.plan(before,()=>{}),()=>{});}catch(_){}
+      return {ok:false,error:'Could not apply this recipe ('+e.message+').',warnings};}
+    return {ok:true,warnings,label:TOOL.label(),before};
+  }
+  function importRecipe(r){
+    const res=applyRecipe(r);
+    if(!res.ok){say(res.error);return res;}
+    const w=res.warnings,note=w.length?w.slice(0,3).join(' · ')+(w.length>3?' · +'+(w.length-3)+' more':''):'';
+    say('Imported '+res.label,{note,action:{label:'Undo',run:()=>{
+      const u=applyRecipe(res.before);say(u.ok?'Back to '+u.label+'.':u.error);}}});
+    return res;
+  }
+  // source: 'file' | 'drop' | 'paste'. Pasted text that is not a recipe is ignored quietly.
+  function importText(text,source){
+    let r;
+    try{r=JSON.parse(text);}catch(e){if(source!=='paste')say('That file is not valid JSON.');return null;}
+    if(source==='paste'&&!TOOL.isCandidate(r))return null;
+    return importRecipe(r);
+  }
+  function readFile(f){
+    if(!/\.json$/i.test(f.name)&&!/json/i.test(f.type)){say('Not a recipe file. Use a .json exported from '+TOOL.name+'.');return Promise.resolve(null);}
+    if(f.size>5e6){say('That file is too large to be a recipe.');return Promise.resolve(null);}
+    return f.text().then(t=>importText(t,'file'),()=>{say('Could not read that file.');return null;});
+  }
+  // Open recipe…
+  const fi=document.createElement('input');fi.type='file';fi.accept='.json,application/json';fi.hidden=true;fi.id='f13r-file';
+  document.body.appendChild(fi);
+  fi.addEventListener('change',()=>{const f=fi.files&&fi.files[0];fi.value='';if(f)readFile(f);});
+  // drop anywhere: overlay while a file is dragged over the window
+  const ov=document.createElement('div');ov.className='f13r-drop';ov.setAttribute('aria-hidden','true');
+  ov.innerHTML='<div class="f13r-card"><span class="f13r-drop-ic"><svg viewBox="0 0 24 24"><path d="M12 15.5V4.6M7.2 9.2 12 4.4l4.8 4.8"/><path d="M5 19.5h14"/></svg></span>'+
+    '<span><b>Drop to open recipe</b><small>'+TOOL.name+' .json</small></span></div>';
+  document.body.appendChild(ov);
+  const hasFiles=e=>!!(e.dataTransfer&&[...e.dataTransfer.types].indexOf('Files')>=0);
+  let hideT=0;
+  const overlay=on=>{clearTimeout(hideT);ov.classList.toggle('on',on);};
+  window.addEventListener('dragenter',e=>{if(hasFiles(e)){e.preventDefault();overlay(true);}});
+  window.addEventListener('dragover',e=>{if(!hasFiles(e))return;e.preventDefault();e.dataTransfer.dropEffect='copy';
+    overlay(true);hideT=setTimeout(()=>overlay(false),400);});   // dragover repeats while inside; silence = gone
+  window.addEventListener('dragleave',e=>{if(!e.relatedTarget)overlay(false);});
+  window.addEventListener('drop',e=>{if(!hasFiles(e))return;e.preventDefault();overlay(false);
+    const fs=[...e.dataTransfer.files],f=fs.find(x=>/\.json$/i.test(x.name))||fs[0];if(f)readFile(f);});
+  // paste (Ctrl/Cmd+V) outside text fields
+  const typing=t=>!!t&&(t.isContentEditable||/^(TEXTAREA|SELECT)$/.test(t.tagName)||
+    (t.tagName==='INPUT'&&!/^(checkbox|radio|range|button|submit|reset|file|color)$/i.test(t.type)));
+  document.addEventListener('paste',e=>{
+    if(typing(e.target)||typing(document.activeElement))return;
+    const s=((e.clipboardData&&e.clipboardData.getData('text/plain'))||'').trim();
+    if(s[0]!=='{'||s.length>5e6)return;
+    if(importText(s,'paste'))e.preventDefault();
+  });
+  window.F13Recipe={apply:applyRecipe,importRecipe,importText,readFile,open:()=>fi.click(),TOOL};
 })();
 </script>
 
