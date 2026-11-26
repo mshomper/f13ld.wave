@@ -34,15 +34,15 @@ The field is periodic, not stochastic — every parameter set is fully determini
 
 Open `index.html` directly in a browser. No server, no build step, no dependencies.
 
+The controls sit in four sections, one at a time: **Modes**, **Field**, **Cell** and **Analyze**. On desktop a rail beside the panel switches them; on a phone the panel is a bottom sheet with a tab bar. Every (i) opens its help card, and the card's **show** button jumps to the control.
+
 **Recommended workflow:**
 
-1. Start from a **preset**, or build a field from scratch
-2. Choose a **symmetry operator** and add cosine **modes** to the mode bank
-3. Tune **iso**, **topology**, and **phase** while watching the live **VF** / **SSA** pills
-4. Sweep **phase ωt** (or hit **Animate**) to morph the standing-wave field
-5. Run **homogenization** to get effective mechanical properties and the directional stiffness surface
-6. **Save JSON** — carries all parameters, metrics, and homogenization results
-7. Click **Open in F13LD.mesh**, or feed the JSON to [F13LD.mesh](https://mshomper.github.io/f13ld.mesh) for watertight 3MF export
+1. **Modes** — start from a **preset**, or build a field from scratch: choose a **symmetry operator** and add cosine **modes** to the mode bank. **Randomize** re-rolls the bank
+2. **Field** — tune **topology**, **iso** and **phase** while watching the live **VF** / **SSA** pills; sweep **phase ωt** or press **Animate** (play / pause) to morph the field
+3. **Cell** — cell scale, stretch x / y / z and tiling
+4. **Analyze** — run **homogenization** for effective mechanical properties and the directional stiffness surface (results clear when the design changes)
+5. Hand the recipe on from the **Recipe** menu in the header: **Export JSON**, **Queue**, **Mesh** for watertight 3MF export in [F13LD.mesh](https://mshomper.github.io/f13ld.mesh), or **Lab** for the FFT solver
 
 ---
 
@@ -80,7 +80,7 @@ Up to **six** cosine modes superpose into a single field. Each mode is:
 - **Amplitude `A`** — relative weight of the mode in the sum.
 - **Phase `φ`** — per-mode phase offset, shifts the mode's nodal set within the cell.
 
-Each mode has its own color and a **solo** toggle that isolates it in the viewport for inspection — solo affects the preview only; presets, metrics, homogenization, and export always use the full mode bank.
+Each mode has its own color and a **solo** toggle that isolates it in the viewport for inspection — solo affects the preview only; presets, metrics, homogenization, and export always use the full mode bank. **Randomize** is its own button; the preset menu then reads "Custom".
 
 ---
 
@@ -110,12 +110,12 @@ Eight starting points spanning the operator space:
 | Solid | `iso − φ` | One solid domain bounded by the `φ = iso` level set |
 | Sheet | `\|iso − φ\| − t` | A shell of half-thickness `t` straddling the level set |
 
-- **iso** — shifts the isosurface threshold. In solid mode this directly controls volume fraction.
+- **iso** — shifts the isosurface threshold. In solid mode this directly controls volume fraction. The slider snaps at 0.
 - **thickness `t`** — shell half-width in sheet mode (0.02–1.5).
 - **Phase A / B** — sign flip; swaps which side of the level set is solid (the two complementary phases of the same field).
 - **cell scale** — physical cell size (0.5–3). Scales the exported domain in millimetres; it does not change the field's frequency content.
 - **stretch x / y / z** — (v0.6, 0.5–2) stretches the unit cell along each axis: the waves keep one period per cell edge, so the cell becomes a box and still tiles seamlessly. Cubic, Chiral and Schoen modes give equal stiffness on all three axes on a cube; stretching is how they become anisotropic. Exported as `field.stretch`; F13LD.mesh (v0.9.8) and F13LD.sweep (v0.29) read it, F13LD.lab still solves a cube and tags the design "stretched cell".
-- **phase ωt** — global standing-wave phase. Sweep it manually or press **Animate** to watch the nodal set evolve in real time.
+- **phase ωt** — global standing-wave phase. Sweep it manually or press **Animate** (play / pause) to watch the nodal set evolve in real time.
 
 ---
 
@@ -123,7 +123,8 @@ Eight starting points spanning the operator space:
 
 A single WebGL 2.0 raymarched view renders the field by sign-change detection with bisection refinement along each ray.
 
-- **Quality** (48–192) sets the raymarch / sampling resolution. It affects preview sharpness only, not the underlying field or any computed metric.
+- **Quality is automatic.** While anything moves the view marches 96 steps at an adaptive reduced scale and is upscaled. About 150 ms after it stops, a 192-step full-resolution rest frame is drawn in strips and swapped in. This affects preview sharpness only, not the field or any computed metric.
+- **One render loop** draws only when something changes and sleeps when idle. A lost WebGL context is rebuilt without a reload. Without WebGL the viewer stays empty, but the controls remain usable.
 - **Tiling** (1×1×1 / 2×2×2 / 3×3×3) repeats the cell in the shader for periodicity inspection at no additional compute cost.
 - **Metric pills** (top-left) report **VF** (volume fraction) and **SSA** (specific surface area), recomputed live as you edit. A **solo** pill appears when a single mode is isolated.
 
@@ -133,7 +134,7 @@ Metrics are computed in a Web Worker on a 64³ grid (32³ synchronous fallback w
 
 ## Homogenization (MIL-HS)
 
-Estimates effective elastic properties from the voxelized field using the Mean Intercept Length method coupled to the Hashin-Shtrikman upper bound. Button-triggered — too heavy to run on every slider move — and computed on the same solid mask the renderer uses, so the analyzed geometry matches the preview exactly.
+Estimates effective elastic properties from the voxelized field using the Mean Intercept Length method coupled to the Hashin-Shtrikman upper bound. Button-triggered — too heavy to run on every slider move — and computed on the same solid mask the renderer uses, so the analyzed geometry matches the preview exactly. Results show only for the current design: a later change clears them, and they are not exported or restored on import.
 
 **Controls:**
 - **grid** (32 / 48 / 64) — analysis resolution
@@ -155,14 +156,14 @@ Estimates effective elastic properties from the voxelized field using the Mean I
 
 ## Export JSON
 
-The exported JSON carries the complete parameter set, the live metrics, and — if homogenization has been run — the mechanical results. This file is the handoff to [F13LD.mesh](https://mshomper.github.io/f13ld.mesh), and the in-app **Open in F13LD.mesh** button passes the same recipe directly via URL.
+The exported JSON carries the complete parameter set, the live metrics, and — if homogenization has been run for the current design — the mechanical results. This file is the handoff to [F13LD.mesh](https://mshomper.github.io/f13ld.mesh), and **Recipe → Mesh** passes the same recipe directly via URL.
 
 ```json
 {
   "schema": "f13ld.wave/v1",
   "tool": "F13LD.wave",
   "family": "wave",
-  "version": "0.6",
+  "version": "0.7",
   "timestamp": "...",
   "field": {
     "symmetry": "pure",
@@ -214,10 +215,22 @@ The exported JSON carries the complete parameter set, the live metrics, and — 
 
 **Coordinate convention.** The field is evaluated at `q = (π/5)·x`, so the world cube `[-5, 5]` maps to exactly one cell (`q ∈ [-π, π]`) and tiles seamlessly. `cellScale` sets the physical cell size in the `domain` block; it is not a frequency multiplier. The SDF is negative-inside; F13LD.mesh applies a single sign flip into the Manifold (positive-inside) convention on import.
 
+### Importing a recipe
+
+**Recipe → Open recipe…**, dropping a `.json` file on the page, or pasting recipe JSON loads a wave recipe back into the tool. The header then says *Imported … · Undo*; Undo restores the previous design.
+
+- Homogenization results do not come back (run it again). Tiling, solo and the clip plane are not in the export, so an import leaves tiling and clears solo.
+- Values outside a control's range are clamped, with a warning. Unknown keys are ignored.
+- A recipe from another F13LD tool is refused with that tool's name.
+- Recipes from a newer major version import with a warning.
+
+The Recipe menu holds Open recipe…, Export JSON, Queue, Choose queue…, Mesh and Lab.
+
 ---
 
 ## Status and next steps
 
+- **v0.7 (2026-11-25):** liquid-ui refresh. Four sections (rail on desktop, bottom sheet and tab bar on phone), widgets with native fallback, Recipe menu and recipe import, automatic quality with an adaptive interactive tier, homogenization results only for the current design. Export format unchanged (`schema` stays `f13ld.wave/v1`). Notes: [`docs/UI_REFRESH.md`](docs/UI_REFRESH.md).
 - **v0.6 (2026-10-10):** stretch sliders; volume fraction, surface area and the MIL-HS estimate measure the stretched cell (stiffness capped at the Voigt bound); export carries `field.stretch` and `domain.size_xyz`. Sweep's Wave family (v0.29) varies amplitudes, phases, phase time, the sheet iso shift and the stretch; fractional mode indices are refused there (one cell is not periodic).
 - **Next:** none planned in this tool. Ideas raised: modes beyond six would be acceptable if a design needs them (they were capped to keep the bank readable). Rigorous stiffness for stretched cells comes from F13LD.sweep (GPU) until F13LD.lab solves stretched cells.
 
@@ -238,6 +251,8 @@ The exported JSON carries the complete parameter set, the live metrics, and — 
 **Fully implicit** — all geometry is defined as a scalar field evaluated pointwise. No mesh generation or STL intermediates exist until Manifold levelSet is invoked in F13LD.mesh.
 
 **3D view** — WebGL 2.0 raymarcher. The standing-wave field is traced by marching each ray until a sign change is detected, then refining the crossing by bisection for a clean isosurface hit. Surface normals are estimated from the analytic field gradient.
+
+**Controls** — the panel uses the [liquid-ui](https://github.com/mshomper/liquid-ui) widgets (sliders, dropdown, segmented controls, toggles, Recipe menu), drawn in WebGL over the native inputs, which stay the source of state. Without WebGL the native controls are shown instead.
 
 **Symmetry transforms** — applied per mode in the fragment shader and mirrored exactly in the CPU field evaluator used for metrics, homogenization, and export, so the preview, the reported numbers, and the meshed result all describe the same geometry.
 

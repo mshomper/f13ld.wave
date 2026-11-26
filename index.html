@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>F13LD.wave v0.6 — Standing Wave Topology Explorer</title>
+<title>F13LD.wave v0.7 — Standing Wave Topology Explorer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -330,7 +330,7 @@ body .f13h-close{width:44px;height:44px}
       <div id="w-recipe"></div>
       <button class="fh-mesh-btn" onclick="openInMesh()" title="Open in F13LD.mesh — build a watertight, printable 3MF" aria-label="Open in F13LD.mesh"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6l5.5 3.2v6.4L8 14.4 2.5 11.2V4.8z"/><path d="M8 8v6.4M8 8L2.5 4.8M8 8l5.5-3.2"/></svg><span>Mesh</span></button>
       <button class="fh-mesh-btn" onclick="openInLab()" title="Open in F13LD.lab — homogenize in the validated FFT solver" aria-label="Open in F13LD.lab"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 1.8h3.6M6.7 1.8v4.4L2.9 12.6a1.2 1.2 0 0 0 1 1.8h8.2a1.2 1.2 0 0 0 1-1.8L9.3 6.2V1.8"/><path d="M4.6 10h6.8"/></svg><span>Lab</span></button>
-      <span class="fh-version">v0.6</span>
+      <span class="fh-version">v0.7</span>
       <div class="fh-icon" style="background:radial-gradient(ellipse at 50% 42%, #243042 0%, #161D27 100%)">
         <svg width="18" height="18" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
           <path d="M35.00,20.00 C35.00,21.65 27.45,22.45 24.95,24.95 C22.45,27.45 21.65,35.00 20.00,35.00 C18.35,35.00 17.55,27.45 15.05,24.95 C12.55,22.45 5.00,21.65 5.00,20.00 C5.00,18.35 12.55,17.55 15.05,15.05 C17.55,12.55 18.35,5.00 20.00,5.00 C21.65,5.00 22.45,12.55 24.95,15.05 C27.45,17.55 35.00,18.35 35.00,20.00 Z" fill="none" stroke="#FBBF24" stroke-width="1.6" stroke-linejoin="round"/>
@@ -2574,7 +2574,7 @@ function buildExportJSON() {
     schema: "f13ld.wave/v1",
     tool: "F13LD.wave",
     family: "wave",
-    version: "0.6",
+    version: "0.7",
     timestamp: new Date().toISOString(),
     field: {
       symmetry: symLabels[State.symmetry],
