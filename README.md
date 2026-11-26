@@ -4,7 +4,7 @@
 
 **[Open the Tool](https://mshomper.github.io/f13ld.wave)**
 
-<img width="1741" height="862" alt="f13ld wave github image" src="https://github.com/user-attachments/assets/241c3d5f-5bc8-4843-a7df-930286e15313" />
+<img width="1440" height="900" alt="F13LD.wave" src="docs/screenshot.png" />
 
 A browser-based standing-wave topology explorer for generating periodic metamaterial scaffolds from superposed cosine modes. It is the three-dimensional analog of the nodal figures sand traces on a vibrating Chladni plate: a bank of standing-wave terms is summed under a chosen symmetry operator and thresholded into a solid or thin-sheet surface. A single design pipeline carries the result through a WebGL 2.0 raymarched 3D preview, live volume-fraction and surface-area metrics, MIL-HS mechanical homogenization, and JSON export for downstream meshing and validation.
 
@@ -236,13 +236,7 @@ The Recipe menu holds Open recipe…, Export JSON, Queue, Choose queue…, Mesh 
 
 ## Part of the F13LD Suite
 
-| Tool | Description |
-|---|---|
-| [TPMS Builder](https://mshomper.github.io/f13ld.tpms) | Periodic implicit surfaces — gyroid, Schwarz P, FRD, and more |
-| [Noise Explorer](https://mshomper.github.io/f13ld.noise) | Isotropic stochastic scaffolds via simplex, cellular, FBM, and curl noise |
-| [Grain](https://mshomper.github.io/f13ld.grain) | Anisotropic stochastic scaffolds — spinodoid, GRF, hyperuniform, reaction-diffusion |
-| **Wave** | Standing-wave / Chladni topology — cosine modes under five symmetry operators |
-| [F13LD.mesh](https://mshomper.github.io/f13ld.mesh) | Watertight 3MF export from any tool JSON — Draft / Standard / Fine resolution |
+The full tool list, what each one does and how recipes move between them: **[f13ld.app](https://f13ld.app)**.
 
 ---
 
